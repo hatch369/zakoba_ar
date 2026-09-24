@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>雑喉場アクアリウム AR</title>
+    <!-- A-Frame本体 -->
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <!-- AR.js -->
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <!-- アニメーション再生プラグイン -->
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
+
+    <style>
+      /* 画面右上に固定表示する終了ボタン */
+      #quit-btn {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        z-index: 9999;
+        background: rgba(0, 0, 0, 0.6);
+        color: #ffffff;
+        text-decoration: none;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 14px;
+        font-family: sans-serif;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+      }
+    </style>
+
+    <!-- 回遊スクリプト（前回調整済みの胴体中心旋回） -->
+    <script>
+      AFRAME.registerComponent('swim-pass-by', {
+        schema: { speed: { type: 'number', default: 0.0008 } },
+        init: function () { this.t = 0; },
+        tick: function (time, timeDelta) {
+          this.t += this.data.speed * timeDelta;
+          const x = Math.sin(this.t) * 1.1;
+          const z = -0.9 - Math.cos(this.t) * 0.5;
+          const y = -0.2 + Math.sin(this.t * 2) * 0.06;
+          this.el.object3D.position.set(x, y, z);
+          
+          const dx = Math.cos(this.t) * 1.1;
+          const dz = Math.sin(this.t) * 0.5;
+          this.el.object3D.rotation.y = Math.atan2(dx, dz);
+          this.el.object3D.rotation.z = -Math.cos(this.t) * 0.08;
+          this.el.object3D.rotation.x = 0;
+        }
+      });
+    </script>
+  </head>
+  <body style="margin: 0; overflow: hidden;">
+    <!-- 終了ボタン（タップで end.html へ） -->
+    <a id="quit-btn" href="end.html">体験をおわる</a>
+
+    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+      <a-assets>
+        <a-asset-item id="turtle" src="image/sea+turtle+3d+model.glb"></a-asset-item>
+      </a-assets>
+
+      <a-entity swim-pass-by="speed: 0.0008">
+        <a-entity 
+          id="turtle-model"
+          gltf-model="#turtle"
+          position="0 0 0.2" 
+          scale="0.55 0.55 0.55"
+          rotation="0 90 0">
+        </a-entity>
+      </a-entity>
+
+      <a-light type="ambient" intensity="1.8" color="#ffffff"></a-light>
+      <a-light type="directional" position="1 2 1" intensity="1.2"></a-light>
+      <a-camera></a-camera>
+    </a-scene>
+  </body>
+</html>
