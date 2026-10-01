@@ -44,7 +44,7 @@
   #gateBtn{width:150px;height:150px;border-radius:50%;border:0;background:radial-gradient(circle at 35% 30%,#CB5A3E,var(--vermillion) 70%);color:#fff8ee;font-family:"Shippori Mincho B1",serif;font-weight:700;font-size:1.05rem;line-height:1.5;letter-spacing:.06em;box-shadow:0 10px 24px rgba(0,0,0,.35),inset 0 0 0 4px rgba(255,255,255,.15);cursor:pointer;padding:12px;}
   #gateBtn:active{transform:scale(.96);}
   #snd{left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%);font-weight:500;font-size:.78rem;background:rgba(6,43,52,.6);pointer-events:none;white-space:nowrap;}
-  #dbg{left:8px;top:calc(8px + env(safe-area-inset-top,0px));color:#9ff;font:11px/1.4 monospace;background:rgba(0,0,0,.45);padding:3px 6px;pointer-events:none;}
+  #dbg{left:8px;right:8px;top:calc(62px + env(safe-area-inset-top,0px));color:#9ff;font:10px/1.35 monospace;background:rgba(0,0,0,.55);padding:3px 6px;pointer-events:none;white-space:pre-wrap;word-break:break-all;}
 
   @media (prefers-reduced-motion:reduce){ #hint{transition:none;} }
 </style>
@@ -522,7 +522,7 @@ function updateFish(f,dt){
 }
 
 /* ============ イワシの群れ（銀色の小さな魚を InstancedMesh で1回描画） ============ */
-var SD_SIL = new THREE.Color(0x3a6f9c), SD_WHITE = new THREE.Color(0xffffff);   // 水の中は青いシルエット、飛び出すと銀色
+var SD_SIL = new THREE.Color(0x3a6f9c), SD_WHITE = new THREE.Color(0xc4ced6);   // 水の中は青いシルエット、飛び出すと銀色
 var school = null, sdDummy = new THREE.Object3D(), sdCol = new THREE.Color(), sdA = new THREE.Vector3(), sdB = new THREE.Vector3();
 function buildSchool(){
   var N = Math.round(qnum('n_sardine', CFG.SARDINES)), SZ = qnum('sz_sardine', CFG.SARDINE_SIZE);
@@ -534,7 +534,7 @@ function buildSchool(){
       var an=q/SD*Math.PI*2, cx=Math.cos(an), cy=Math.sin(an);
       pos.push(cx*0.011*pf, cy*0.021*pf, z);
       var bk=clamp(cy*0.7+0.5,0,1);          // 背=1 → 腹=0
-      col.push(lerp(1,0.42,bk), lerp(1,0.56,bk), lerp(1,0.74,bk));
+      col.push(lerp(0.85,0.38,bk), lerp(0.88,0.5,bk), lerp(0.92,0.66,bk));
     }
   }
   for(var r2=0;r2<RN;r2++) for(var q2=0;q2<SD;q2++){
@@ -549,7 +549,7 @@ function buildSchool(){
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
   geo.setIndex(idx); geo.computeVertexNormals();
-  var mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({vertexColors:true, side:THREE.DoubleSide, emissive:0x37424d}), N);
+  var mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({vertexColors:true, side:THREE.DoubleSide, emissive:0x11161b}), N);
   mesh.frustumCulled = false; mesh.visible = false; mesh.renderOrder = 6;
   mesh.material.color.copy(SD_SIL);
   world.add(mesh);
@@ -583,7 +583,7 @@ function loadSardineGLB(){
     var sc=school, geo=m.geometry, ph=new Float32Array(sc.N);
     for(var i=0;i<sc.N;i++) ph[i]=sc.f[i].ph;
     geo.setAttribute('aPh',new THREE.InstancedBufferAttribute(ph,1));   // 個体ごとの尾の振りのずれ
-    var mat=new THREE.MeshStandardMaterial({map:m.material.map, roughness:0.6, metalness:0.1, emissive:0x2a323a, side:THREE.DoubleSide});
+    var mat=new THREE.MeshStandardMaterial({map:m.material.map, roughness:0.6, metalness:0.1, emissive:0x11161b, side:THREE.DoubleSide});
     mat.color.copy(sc.mesh.material.color);
     mat.onBeforeCompile=function(sh){
       sh.uniforms.uT=sc.uT;
@@ -1009,7 +1009,12 @@ function frame(tMs,dtMs){
     if(hintMesh&&hintMesh.visible) hintMesh.lookAt(vCam);
     xrButtons.forEach(function(b){ b.mesh.visible=true; });
   }
-  if(!elDbg.hidden) elDbg.textContent=S.state+' sensor:'+(camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor)+' xr:'+S.xr+' t:'+T.toFixed(1)+' snd:'+Snd.state()+' glb:'+glbLog.join(',')+' sd:'+(school?(school.state+'/'+(school.mesh.visible?'show':'hide')+'/'+school.N+(school.err?'/ERR '+school.err:'')):'none');
+  if(!elDbg.hidden){
+    var gl=glbLog.filter(function(x){ return !/^(iwashi|sd:)/.test(x); }), sl=glbLog.filter(function(x){ return /^(iwashi|sd:)/.test(x); });
+    elDbg.textContent=S.state+' sensor:'+(camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor)+' xr:'+S.xr+' t:'+T.toFixed(1)+' snd:'+Snd.state()
+      +'\nglb: '+gl.join(' ')
+      +'\nsd: '+(school?(school.state+'/'+(school.mesh.visible?'show':'hide')+'/'+school.N+(school.err?'/ERR '+school.err:'')):'none')+' '+sl.join(' ');
+  }
   if(!elMotion.hidden&&camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor) elMotion.hidden=true;
 }
 window.__zkFrame=frame;
