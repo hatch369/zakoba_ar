@@ -451,7 +451,7 @@ var FISH_DEF = [
   {kind:'tuna',  make:makeTuna,  len:1.0, sil:0.5,  apex:2.4, dur:1.8, orb:{r:2.4,h:-0.35,speed:0.8,dir:-1,alpha:-1.2}, ip:{a:0.50,b:0.52,w:-0.8,ph:2.1,y:-0.40}, tf:[9,0.35]},
   {kind:'tuna',  make:makeTuna,  len:1.0, sil:0.5,  apex:2.5, dur:1.9, orb:{r:2.9,h:0.5, speed:0.85,dir:1,alpha:-1.57}, ip:{a:0.70,b:0.30,w:1.0, ph:4.0,y:-0.28}, tf:[9,0.35]},
   {kind:'turtle',make:makeTurtle,len:0.9, sil:0.5,  apex:2.2, dur:2.4, orb:{r:2.2,h:-0.45,speed:0.35,dir:-1,alpha:-1.35}, ip:{a:0.45,b:0.45,w:0.5, ph:1.0,y:-0.50}, tf:null, sway:true},
-  {kind:'whale', make:makeWhale, len:qnum('len_whale',5.5), sil:0.26*qnum('len_whale',5.5)/3.6, apex:3.2, dur:3.4, orb:{r:4.0,h:0.35,speed:0.55,dir:1,alpha:-1.75},  ip:{a:0.55,b:0.34,w:0.45,ph:0.5,y:-1.00}, tf:[1.6,0.2]}
+  {kind:'whale', make:makeWhale, len:qnum('len_whale',5.5), sil:0.26*qnum('len_whale',5.5)/3.6, apex:3.2, dur:4.5, behind:true, turn:3.5, orb:{r:4.0,h:0.35,speed:0.55,dir:1,alpha:-1.75},  ip:{a:0.55,b:0.34,w:0.45,ph:0.5,y:-1.00}, tf:[1.6,0.2]}
 ];
 function buildFish(){
   FISH_DEF.forEach(function(d,i){
@@ -481,7 +481,18 @@ function launch(f){
   f.S.copy(o.position); f.S.y=-0.25;
   var tA=T+f.dur; f.theta0=f.orb.alpha-f.orb.dir*f.orb.w*tA;
   orbitPos(f,tA,f.Tp);
-  f.C.set((f.S.x+f.Tp.x)/2, 2*(f.d.apex-(f.S.y+f.Tp.y)/4), (f.S.z+f.Tp.z)/2);
+  f.cubic=false;
+  if(f.d.behind){
+    // 見ている方向（水面のある方向）の真後ろに着地。軌道の接線方向に滑らかに入るので、向きが急に変わらない
+    var th=Math.atan2(waterRig.position.z,waterRig.position.x)+Math.PI;
+    f.orb.alpha=th; f.theta0=th-f.orb.dir*f.orb.w*tA; orbitPos(f,tA,f.Tp);
+    var sd=f.orb.dir, ex=f.Tp.x-f.S.x, ez=f.Tp.z-f.S.z, en=Math.hypot(ex,ez)||1; ex/=en; ez/=en;
+    f.P1=new THREE.Vector3(f.S.x-ex*1.0, f.S.y+7.0, f.S.z-ez*1.0);        // 真上に飛び出して、頭上を越える
+    f.P2=new THREE.Vector3(f.Tp.x+sd*Math.sin(th)*1.2, f.Tp.y, f.Tp.z-sd*Math.cos(th)*1.2);   // 軌道の接線の手前から入る
+    f.cubic=true;
+  }else{
+    f.C.set((f.S.x+f.Tp.x)/2, 2*(f.d.apex-(f.S.y+f.Tp.y)/4), (f.S.z+f.Tp.z)/2);
+  }
   f.prev.copy(f.S);
   startSea();
 }
@@ -501,7 +512,12 @@ function updateFish(f,dt){
       if(u>=1){ f.state='orbit'; }
       else{
         var v=1-u;
-        o.position.set(v*v*f.S.x+2*v*u*f.C.x+u*u*f.Tp.x, v*v*f.S.y+2*v*u*f.C.y+u*u*f.Tp.y, v*v*f.S.z+2*v*u*f.C.z+u*u*f.Tp.z);
+        if(f.cubic){
+          var b0=v*v*v, b1=3*v*v*u, b2=3*v*u*u, b3=u*u*u;
+          o.position.set(b0*f.S.x+b1*f.P1.x+b2*f.P2.x+b3*f.Tp.x, b0*f.S.y+b1*f.P1.y+b2*f.P2.y+b3*f.Tp.y, b0*f.S.z+b1*f.P1.z+b2*f.P2.z+b3*f.Tp.z);
+        }else{
+          o.position.set(v*v*f.S.x+2*v*u*f.C.x+u*u*f.Tp.x, v*v*f.S.y+2*v*u*f.C.y+u*u*f.Tp.y, v*v*f.S.z+2*v*u*f.C.z+u*u*f.Tp.z);
+        }
         o.scale.setScalar(lerp(d.sil,d.len,easeOut(u*1.3)));
         tintFish(o,clamp((T-f.t0)/0.5,0,1));   // 飛び出した瞬間に元の色へ
       }
@@ -510,7 +526,7 @@ function updateFish(f,dt){
       orbitPos(f,T,o.position); o.scale.setScalar(d.len); tintFish(o,1);
     }
     keepOut(o.position);
-    tmpDir.copy(o.position).sub(f.prev); faceDir(o,tmpDir,dt,7);
+    tmpDir.copy(o.position).sub(f.prev); faceDir(o,tmpDir,dt,d.turn||7);
   }
   var ud=o.userData;
   if(ud.mixer) ud.mixer.update(dt);
