@@ -43,6 +43,7 @@
   .gate-inner rt{color:var(--foam);}
   #gateBtn{width:150px;height:150px;border-radius:50%;border:0;background:radial-gradient(circle at 35% 30%,#CB5A3E,var(--vermillion) 70%);color:#fff8ee;font-family:"Shippori Mincho B1",serif;font-weight:700;font-size:1.05rem;line-height:1.5;letter-spacing:.06em;box-shadow:0 10px 24px rgba(0,0,0,.35),inset 0 0 0 4px rgba(255,255,255,.15);cursor:pointer;padding:12px;}
   #gateBtn:active{transform:scale(.96);}
+  #snd{left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%);font-weight:500;font-size:.78rem;background:rgba(6,43,52,.6);pointer-events:none;white-space:nowrap;}
   #dbg{left:8px;top:calc(8px + env(safe-area-inset-top,0px));color:#9ff;font:11px/1.4 monospace;background:rgba(0,0,0,.45);padding:3px 6px;pointer-events:none;}
 
   @media (prefers-reduced-motion:reduce){ #hint{transition:none;} }
@@ -109,6 +110,7 @@ AFRAME.registerComponent('zk-loop',{ tick:function(t,dt){ if(window.__zkFrame) w
 <button id="place" class="ui pill" type="button"></button>
 <div id="hint" class="ui"></div>
 <button id="motion" class="ui pill" type="button" hidden></button>
+<div id="snd" class="ui pill" hidden></div>
 <div id="dbg" class="ui" hidden></div>
 
 <div id="gate" class="ui">
@@ -136,7 +138,8 @@ var CFG = {
   STAGGER: 0.3,       // 飛び出しの間隔(秒)
   KEEP: 1.05,         // 顔の周り、魚が入らない半径(m)
   SEA_OP_PHONE: 0.88, // 海の球の濃さ（スマホ）
-  SEA_OP_AR: 0.5      // 海の球の濃さ（Quest パススルー）
+  SEA_OP_AR: 0.5,     // 海の球の濃さ（Quest パススルー）
+  GLB_TIMEOUT: 10     // GLBの読み込みを待つ最大秒数（市場の開始から。超えたら図形の魚で続行）
 };
 
 /* ============ 文言（つうじょう／キッズ） ============ */
@@ -155,7 +158,8 @@ var TXT = {
   quest: P([{t:'ARをはじめます。ボタンを押してください。'}],[{t:'ARを はじめるよ。ボタンを おしてね。'}]),
   noXR:  P([{t:'このブラウザでは、ARをはじめられませんでした。もう一度お試しください。'}],
            [{t:'ARを はじめられなかったよ。もういちど ためしてね。'}]),
-  motion:P([{t:'傾きセンサーを許可'}],[{t:'スマホの '},{t:'傾',r:'かたむ'},{t:'きを つかう'}])
+  motion:P([{t:'傾きセンサーを許可'}],[{t:'スマホの '},{t:'傾',r:'かたむ'},{t:'きを つかう'}]),
+  snd:   P([{t:'ふれると音がでるよ'}],[{t:'ふれると '},{t:'音',r:'おと'},{t:'が でるよ'}])
 };
 function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 function H(segs){ return segs.map(function(s){ return s.r ? '<ruby>'+esc(s.t)+'<rt>'+esc(s.r)+'</rt></ruby>' : esc(s.t); }).join(''); }
@@ -164,8 +168,8 @@ function plain(segs){ return segs.map(function(s){return s.t+(s.r||'');}).join('
 /* ============ DOM ============ */
 var $ = function(id){ return document.getElementById(id); };
 var scene = $('scene'), camEl = $('cam3d'), vid = $('camvideo');
-var elQuit=$('quit'), elPlace=$('place'), elHint=$('hint'), elMotion=$('motion'), elGate=$('gate'), elGateMsg=$('gateMsg'), elGateBtn=$('gateBtn'), elDbg=$('dbg');
-elQuit.innerHTML = H(TXT.quit); elPlace.innerHTML = H(TXT.place); elHint.innerHTML = H(TXT.hint); elMotion.innerHTML = H(TXT.motion);
+var elQuit=$('quit'), elPlace=$('place'), elHint=$('hint'), elMotion=$('motion'), elSnd=$('snd'), elGate=$('gate'), elGateMsg=$('gateMsg'), elGateBtn=$('gateBtn'), elDbg=$('dbg');
+elQuit.innerHTML = H(TXT.quit); elPlace.innerHTML = H(TXT.place); elHint.innerHTML = H(TXT.hint); elMotion.innerHTML = H(TXT.motion); elSnd.innerHTML = H(TXT.snd);
 if(/[?&]debug/.test(location.search)) elDbg.hidden = false;
 
 var isQuest = /OculusBrowser|Quest/i.test(navigator.userAgent);
@@ -389,6 +393,7 @@ function startSea(){
   S.seaT0=T; S.marketTarget=0;
   seaMesh.visible=true; raysGroup.visible=true; bubbles.visible=true;
   waveRing.visible=true; waveRing.position.set(waterRig.position.x,0.03,waterRig.position.z);
+  Snd.sea();
   S.seaMax = (scene.is('ar-mode')) ? CFG.SEA_OP_AR : CFG.SEA_OP_PHONE;
 }
 
@@ -400,7 +405,12 @@ function part(parent,geo,color,pos,scl){
   m.userData.base=new THREE.Color(color); parent.add(m); return m;
 }
 function tintFish(o,k){
-  o.traverse(function(m){ if(m.isMesh&&m.userData.base){ m.material.color.copy(SIL).lerp(m.userData.base,k); m.material.emissive.copy(m.userData.base).multiplyScalar(0.18*k); } });
+  if(o.userData.tk===k) return; o.userData.tk=k;   // 変化がなければ何もしない
+  o.traverse(function(m){
+    if(!m.isMesh) return;
+    if(m.userData.base){ m.material.color.copy(SIL).lerp(m.userData.base,k); m.material.emissive.copy(m.userData.base).multiplyScalar(0.18*k); }
+    else if(m.userData.tints){ m.userData.tints.forEach(function(t){ t.mat.color.copy(SIL).lerp(t.base,k); if(t.mat.emissive) t.mat.emissiveIntensity=k; }); }   // GLB
+  });
 }
 function makeTuna(){
   var g=new THREE.Group();
@@ -440,7 +450,7 @@ var FISH_DEF = [
   {kind:'tuna',  make:makeTuna,  len:1.0, sil:0.5,  apex:2.3, dur:1.8, orb:{r:1.9,h:0.15,speed:0.9,dir:1,alpha:-1.9}, ip:{a:0.62,b:0.40,w:0.9, ph:0.0,y:-0.32}, tf:[9,0.35]},
   {kind:'tuna',  make:makeTuna,  len:1.0, sil:0.5,  apex:2.4, dur:1.8, orb:{r:2.4,h:-0.35,speed:0.8,dir:-1,alpha:-1.2}, ip:{a:0.50,b:0.52,w:-0.8,ph:2.1,y:-0.40}, tf:[9,0.35]},
   {kind:'tuna',  make:makeTuna,  len:1.0, sil:0.5,  apex:2.5, dur:1.9, orb:{r:2.9,h:0.5, speed:0.85,dir:1,alpha:-1.57}, ip:{a:0.70,b:0.30,w:1.0, ph:4.0,y:-0.28}, tf:[9,0.35]},
-  {kind:'turtle',make:makeTurtle,len:0.9, sil:0.5,  apex:2.2, dur:2.4, orb:{r:2.2,h:-0.45,speed:0.35,dir:-1,alpha:-1.35}, ip:{a:0.45,b:0.45,w:0.5, ph:1.0,y:-0.50}, tf:null},
+  {kind:'turtle',make:makeTurtle,len:0.9, sil:0.5,  apex:2.2, dur:2.4, orb:{r:2.2,h:-0.45,speed:0.35,dir:-1,alpha:-1.35}, ip:{a:0.45,b:0.45,w:0.5, ph:1.0,y:-0.50}, tf:null, sway:true},
   {kind:'whale', make:makeWhale, len:3.6, sil:0.26, apex:2.9, dur:3.4, orb:{r:3.4,h:0.35,speed:0.55,dir:1,alpha:-1.75},  ip:{a:0.55,b:0.34,w:0.45,ph:0.5,y:-1.00}, tf:[1.6,0.2]}
 ];
 function buildFish(){
@@ -466,6 +476,7 @@ function keepOut(p){
 function launch(f){
   f.state='fly'; f.t0=T; var o=f.obj;
   spawnRipple(f.last.x,f.last.z,0.55,0.9,1.6,0,true);   // しぶき
+  Snd.splash(f.d.kind==='whale'?0.7:0.4);
   world.attach(o);
   f.S.copy(o.position); f.S.y=-0.25;
   var tA=T+f.dur; f.theta0=f.orb.alpha-f.orb.dir*f.orb.w*tA;
@@ -502,8 +513,95 @@ function updateFish(f,dt){
     tmpDir.copy(o.position).sub(f.prev); faceDir(o,tmpDir,dt,7);
   }
   var ud=o.userData;
+  if(ud.mixer) ud.mixer.update(dt);
+  if(ud.pivot&&d.sway){ ud.pivot.position.y=Math.sin(T*1.1+f.ph)*0.025; ud.pivot.rotation.z=Math.sin(T*1.3+f.ph)*0.07; }   // 動きのないGLB（ウミガメ）用
   if(ud.tail&&d.tf) ud.tail.rotation.y=Math.sin(T*d.tf[0]+f.ph)*d.tf[1];
   if(ud.flips) ud.flips.forEach(function(pv){ pv.rotation.z=pv.userData.s*Math.sin(T*2.4)*0.5; });
+}
+
+/* ============ GLBの差し込み（失敗・遅延したら図形の魚のまま続行） ============ */
+/* 各モデルは「長さ1・前方+Z」に正規化して使う。向きが逆・横向きなら yaw(度) を調整。
+   確認用に URL で上書きもできる：?yaw_tuna=180&yaw_whale=90&sc_turtle=1.2 など */
+function qnum(k,d){ var m=location.search.match(new RegExp('[?&]'+k+'=(-?[0-9.]+)')); return m?parseFloat(m[1]):d; }
+var GLB_DEF = {
+  tuna:  {file:'tuna_fish.glb', yaw:qnum('yaw_tuna',0),   sc:qnum('sc_tuna',1),   anim:1},
+  turtle:{file:'sea_turtle.glb',yaw:qnum('yaw_turtle',0), sc:qnum('sc_turtle',1), anim:1},
+  whale: {file:'blue_whale.glb',yaw:qnum('yaw_whale',0),  sc:qnum('sc_whale',1),  anim:1}
+};
+var glbLog=[], glbPending=0, glbExpired=false, glbClock=false, glbLoader=null;
+function startGlbClock(){ if(glbClock) return; glbClock=true; setTimeout(function(){ glbExpired=true; },CFG.GLB_TIMEOUT*1000); }
+function makeGlbLoader(){
+  var ld=new THREE.GLTFLoader();
+  try{ if(THREE.DRACOLoader){ var dl=new THREE.DRACOLoader(); dl.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); ld.setDRACOLoader(dl); } }catch(e){}
+  try{ if(THREE.MeshoptDecoder) ld.setMeshoptDecoder(typeof THREE.MeshoptDecoder==='function'?THREE.MeshoptDecoder():THREE.MeshoptDecoder); }catch(e){}
+  return ld;
+}
+/* 骨付きモデルの複製（テクスチャは共有。マグロ3匹でも読み込みは1回） */
+function cloneModel(src){
+  var clone=src.clone(true), sL=new Map(), cL=new Map();
+  (function pt(a,b){ sL.set(b,a); cL.set(a,b); for(var i=0;i<a.children.length;i++) pt(a.children[i],b.children[i]); })(src,clone);
+  clone.traverse(function(n){
+    if(!n.isSkinnedMesh) return;
+    var sm=sL.get(n), sk=sm.skeleton.clone();
+    sk.bones=sm.skeleton.bones.map(function(b){ return cL.get(b); });
+    n.skeleton=sk; n.bindMatrix.copy(sm.bindMatrix); n.bind(sk,n.bindMatrix);
+  });
+  return clone;
+}
+function prepModel(root){
+  root.traverse(function(m){
+    if(!m.isMesh) return;
+    m.frustumCulled=false;   // 骨アニメで形が変わっても消えないように
+    var one=!Array.isArray(m.material), arr=one?[m.material]:m.material;
+    var cl=arr.map(function(mt){ var c=mt.clone(); if(c.metalness!==undefined) c.metalness=Math.min(c.metalness,0.25); return c; });   // 魚ごとに色を変えるので材質は複製（テクスチャは共有）
+    m.material=one?cl[0]:cl;
+    m.userData.tints=cl.map(function(c){ return {mat:c,base:c.color.clone()}; });
+  });
+}
+function measureModel(scn){
+  scn.updateMatrixWorld(true);
+  var box=new THREE.Box3().setFromObject(scn,true), size=new THREE.Vector3(), ctr=new THREE.Vector3();
+  box.getSize(size); box.getCenter(ctr);
+  var L=Math.max(size.x,size.z);
+  if(!isFinite(L)||L<=0||!isFinite(ctr.x+ctr.y+ctr.z)) throw new Error('bbox');
+  return {L:L,ctr:ctr,alongX:size.x>size.z};
+}
+function wrapModel(gltf,nm,def,ph){
+  var scn=cloneModel(gltf.scene); prepModel(scn);
+  var inner=new THREE.Group(); inner.add(scn); inner.position.copy(nm.ctr).negate();
+  var pivot=new THREE.Group(); pivot.add(inner); pivot.scale.setScalar(def.sc/nm.L);
+  pivot.rotation.y=(nm.alongX?-Math.PI/2:0)+def.yaw*Math.PI/180;   // 横向き（ウミガメ）は自動で前方+Zへ
+  var wrap=new THREE.Group(); wrap.add(pivot); wrap.userData.pivot=pivot;
+  var an=gltf.animations||[];
+  if(an.length){
+    var clip=an.reduce(function(a,b){ return b.tracks.length>a.tracks.length?b:a; });   // トラックが一番多いものを使う
+    var mx=new THREE.AnimationMixer(scn), act=mx.clipAction(clip); act.timeScale=def.anim; act.play(); mx.update(ph*0.7); wrap.userData.mixer=mx;
+  }
+  return wrap;
+}
+function swapFish(f,obj){
+  if(f.state!=='idle'||glbExpired) return false;
+  var old=f.obj; tintFish(obj,0);
+  obj.scale.copy(old.scale); obj.position.copy(old.position); obj.quaternion.copy(old.quaternion);
+  waterRig.remove(old); waterRig.add(obj); f.obj=obj; return true;
+}
+function loadGLBs(){
+  if(!THREE.GLTFLoader){ glbLog.push('noLoader'); return; }
+  try{ glbLoader=makeGlbLoader(); }catch(e){ glbLog.push('loaderErr'); return; }
+  var jobs={};
+  fish.forEach(function(f){
+    var k=f.d.kind, def=GLB_DEF[k]; if(!def) return;
+    if(!jobs[k]) jobs[k]=fetch(def.file).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
+      .then(function(buf){ return new Promise(function(res,rej){ glbLoader.parse(buf,'',res,rej); }); })
+      .then(function(g){ return {g:g,nm:measureModel(g.scene)}; });
+    glbPending++;
+    jobs[k].then(function(r){
+      var ok=swapFish(f,wrapModel(r.g,r.nm,def,f.ph));
+      glbLog.push(k+(ok?':ok':':late')+'(L'+r.nm.L.toFixed(1)+(r.nm.alongX?',X':',Z')+')');
+    }).catch(function(e){
+      glbLog.push(k+':NG('+String((e&&e.message)||e).slice(0,40)+')');
+    }).then(function(){ glbPending--; });
+  });
 }
 
 /* ============ Quest用の3Dボタンとヒント ============ */
@@ -524,7 +622,7 @@ function buildXrUi(){
 /* ============ タッチ ============ */
 function poke(lx,lz){
   if(S.state!=='water'||S.waterK<0.6) return;
-  S.state='popped'; hideHint();
+  S.state='popped'; hideHint(); Snd.splash(0.6);
   spawnRipple(lx,lz,1.15,0.9,2.6,0,true);
   spawnRipple(lx,lz,1.0,0.8,2.4,0.25,true);
   spawnRipple(lx,lz,0.85,0.7,2.2,0.5,true);
@@ -565,17 +663,146 @@ $('ctlR').addEventListener('triggerdown',function(){ xrTrigger($('ctlR')); });
 function showHint(){ S.hintShown=true; if(S.xr){ hintMesh.visible=true; } else { elHint.classList.add('on'); } }
 function hideHint(){ elHint.classList.remove('on'); if(hintMesh) hintMesh.visible=false; }
 
+/* ============ 音（Web Audioで合成。市場のざわめきだけ market.mp3 を使う。無ければ無音） ============ */
+var MARKET_FILE='market.mp3', VOICE_FILE='voice.mp3';
+/* voice.mp3 の中の3つの掛け声（秒）。ランダムに1つずつ、少しピッチを変えて、左右の位置もばらして重ねる */
+var VOICE_CUT=[[0,2.25],[2.76,4.55],[4.95,5.62]];
+var Snd=(function(){
+  var AC=window.AudioContext||window.webkitAudioContext;
+  var ctx=null, master=null, mGain=null, seaGain=null, noiseBuf=null, seaBuf=null, seaSrc=null;
+  var mBuf=null, vBuf=null, mSrc=null, mWanted=false, seaOn=false, nextBub=0, nextVoice=2.5, lastVoice=-1, loaded=false;
+
+  function init(){
+    if(ctx||!AC) return;
+    try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}   // iOSのマナーモードでも鳴らす
+    try{ ctx=new AC(); }catch(e){ ctx=null; return; }
+    var comp=ctx.createDynamicsCompressor(); comp.threshold.value=-20; comp.ratio.value=6;   // 急に大きい音が出ないように
+    master=ctx.createGain(); master.gain.value=0.8; master.connect(comp); comp.connect(ctx.destination);
+    mGain=ctx.createGain(); mGain.gain.value=0; mGain.connect(master);
+    seaGain=ctx.createGain(); seaGain.gain.value=0; seaGain.connect(master);
+    // 白色ノイズ（しぶき用）
+    var n=ctx.sampleRate*2; noiseBuf=ctx.createBuffer(1,n,ctx.sampleRate); var d=noiseBuf.getChannelData(0);
+    for(var i=0;i<n;i++) d[i]=Math.random()*2-1;
+    ctx.onstatechange=function(){ if(ctx.state==='running') onRunning(); };
+  }
+  function loadBuf(file,cb){
+    try{
+      fetch(file).then(function(r){ if(!r.ok) throw new Error('no file'); return r.arrayBuffer(); }).then(function(ab){
+        return new Promise(function(res,rej){ var p=ctx.decodeAudioData(ab,res,rej); if(p&&p.then) p.then(res,rej); });
+      }).then(cb).catch(function(){});   // ファイルが無ければ無音で続行
+    }catch(e){}
+  }
+  function loadMarket(){
+    if(loaded||!ctx) return; loaded=true;
+    loadBuf(MARKET_FILE,function(b){ mBuf=b; startMarket(); });
+    loadBuf(VOICE_FILE,function(b){ vBuf=b; });
+  }
+  function voice(){   // 市場の男性の掛け声
+    if(!vBuf||!ctx) return;
+    var i; do{ i=Math.floor(Math.random()*VOICE_CUT.length); }while(i===lastVoice&&VOICE_CUT.length>1); lastVoice=i;
+    var c=VOICE_CUT[i], rate=0.9+Math.random()*0.2, dur=(c[1]-c[0])/rate, t=ctx.currentTime+0.02;
+    var src=ctx.createBufferSource(); src.buffer=vBuf; src.playbackRate.value=rate;
+    var lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=3500+Math.random()*2500;   // 遠くから聞こえる感じ
+    var g=ctx.createGain(), v=0.35+Math.random()*0.3;
+    g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(v,t+0.04); g.gain.setValueAtTime(v,t+Math.max(0.05,dur-0.1)); g.gain.linearRampToValueAtTime(0.0001,t+dur);
+    src.connect(lp); lp.connect(g); pan(g,Math.random()*1.8-0.9).connect(master);
+    src.start(t,c[0],c[1]-c[0]);
+  }
+  function onRunning(){
+    // iOS対策：無音を1回鳴らして出力を有効にする
+    try{ var b=ctx.createBuffer(1,1,22050), s=ctx.createBufferSource(); s.buffer=b; s.connect(ctx.destination); s.start(0); }catch(e){}
+    startMarket();
+  }
+  function startMarket(){
+    if(!ctx||!mBuf||mSrc||!mWanted||ctx.state!=='running'||seaOn) return;
+    mSrc=ctx.createBufferSource(); mSrc.buffer=mBuf; mSrc.loop=true; mSrc.connect(mGain);
+    var t=ctx.currentTime; mGain.gain.cancelScheduledValues(t); mGain.gain.setValueAtTime(0,t); mGain.gain.linearRampToValueAtTime(0.4,t+1.5);
+    mSrc.start(0);
+  }
+  function stopMarket(){
+    if(!ctx||!mSrc) return; var s=mSrc; mSrc=null;
+    var t=ctx.currentTime; mGain.gain.cancelScheduledValues(t); mGain.gain.setValueAtTime(mGain.gain.value,t); mGain.gain.linearRampToValueAtTime(0,t+1.2);
+    setTimeout(function(){ try{ s.stop(); }catch(e){} },1400);
+  }
+  function brown(sec){   // ループのつなぎ目が目立たない水中のこもった音
+    var sr=ctx.sampleRate, n=Math.floor(sr*sec), N=Math.floor(sr*0.5), len=n+N, tmp=new Float32Array(len), b=0, i;
+    for(i=0;i<len;i++){ b=(b+0.02*(Math.random()*2-1))/1.02; tmp[i]=b*3.5; }
+    var buf=ctx.createBuffer(1,n,sr), d=buf.getChannelData(0);
+    for(i=0;i<n;i++) d[i]=tmp[i];
+    for(i=0;i<N;i++){ var k=i/N; d[i]=tmp[i]*k+tmp[n+i]*(1-k); }
+    return buf;
+  }
+  function pan(node,v){ try{ if(ctx.createStereoPanner){ var p=ctx.createStereoPanner(); p.pan.value=v; node.connect(p); return p; } }catch(e){} return node; }
+  function bubble(){
+    var t=ctx.currentTime+0.01, o=ctx.createOscillator(), g=ctx.createGain(), f0=500+Math.random()*800;
+    o.type='sine'; o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f0*1.7,t+0.09);
+    g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.045,t+0.008); g.gain.exponentialRampToValueAtTime(0.0001,t+0.13);
+    o.connect(g); pan(g,Math.random()*1.6-0.8).connect(master); o.start(t); o.stop(t+0.15);
+  }
+  return {
+    attempt:function(){ init(); if(!ctx) return; loadMarket(); try{ ctx.resume(); }catch(e){} },
+    unlock:function(){
+      init(); if(!ctx) return; loadMarket();
+      if(ctx.state!=='running'){ try{ var p=ctx.resume(); if(p&&p.then) p.then(function(){ if(ctx.state==='running') onRunning(); }); }catch(e){} }
+    },
+    running:function(){ return !AC || (ctx&&ctx.state==='running'); },
+    state:function(){ return ctx?ctx.state:'none'; },
+    market:function(on){ mWanted=on; if(on) startMarket(); else stopMarket(); },
+    splash:function(a){   // a: 0〜1。立ち上がりはゆるやかに
+      if(!ctx||ctx.state==='closed') return;
+      var t=ctx.currentTime+0.005;
+      var src=ctx.createBufferSource(); src.buffer=noiseBuf;
+      var lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.setValueAtTime(3200,t); lp.frequency.exponentialRampToValueAtTime(500,t+0.55);
+      var g=ctx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.26*a,t+0.03); g.gain.exponentialRampToValueAtTime(0.0001,t+0.7);
+      src.connect(lp); lp.connect(g); g.connect(master); src.start(t,Math.random()*1.0,0.8);
+      var o=ctx.createOscillator(), og=ctx.createGain();
+      o.type='sine'; o.frequency.setValueAtTime(520,t); o.frequency.exponentialRampToValueAtTime(170,t+0.2);
+      og.gain.setValueAtTime(0.0001,t); og.gain.linearRampToValueAtTime(0.14*a,t+0.015); og.gain.exponentialRampToValueAtTime(0.0001,t+0.24);
+      o.connect(og); og.connect(master); o.start(t); o.stop(t+0.26);
+    },
+    sea:function(){   // 水中のこもった音に切り替える
+      if(!ctx||seaOn) return; seaOn=true; mWanted=false; stopMarket();
+      seaBuf=seaBuf||brown(6);
+      seaSrc=ctx.createBufferSource(); seaSrc.buffer=seaBuf; seaSrc.loop=true;
+      var lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=420; lp.Q.value=0.7;
+      seaSrc.connect(lp); lp.connect(seaGain);
+      var t=ctx.currentTime; seaGain.gain.cancelScheduledValues(t); seaGain.gain.setValueAtTime(0,t); seaGain.gain.linearRampToValueAtTime(0.16,t+2.6);
+      seaSrc.start(0); nextBub=1.2;
+    },
+    tick:function(dt){
+      if(!ctx||ctx.state!=='running') return;
+      if(mWanted&&!seaOn&&vBuf){ nextVoice-=dt; if(nextVoice<=0){ voice(); nextVoice=3.5+Math.random()*5; } }   // 市場の間だけ
+      if(!seaOn) return;
+      nextBub-=dt;
+      if(nextBub<=0){ bubble(); if(Math.random()<0.4) setTimeout(bubble,90+Math.random()*80); if(Math.random()<0.2) setTimeout(bubble,230+Math.random()*100); nextBub=0.3+Math.random()*1.2; }
+    },
+    suspend:function(){ if(ctx&&ctx.state==='running') try{ ctx.suspend(); }catch(e){} },
+    resume:function(){ if(ctx&&ctx.state==='suspended') try{ ctx.resume(); }catch(e){} },
+    stop:function(){ if(ctx&&ctx.state!=='closed') try{ ctx.close(); }catch(e){} }
+  };
+})();
+// 自動再生がブロックされたとき、最初のタッチで解除する
+['pointerdown','pointerup','touchend','click','keydown'].forEach(function(ev){
+  window.addEventListener(ev,function(){ Snd.unlock(); },true);
+});
+document.addEventListener('visibilitychange',function(){ if(document.hidden) Snd.suspend(); else Snd.resume(); });
+var sndShown=null;
+function updSndLabel(){
+  var want=S.ready&&!S.xr&&!Snd.running();
+  if(want!==sndShown){ sndShown=want; elSnd.hidden=!want; }
+}
+
 /* ============ 終了 ============ */
 function stopCam(){ try{ if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; } }catch(e){} try{ vid.srcObject=null; }catch(e){} }
 function endExperience(){
-  stopCam();
+  stopCam(); Snd.stop();
   var wait=0;
   try{ if(scene.renderer&&scene.renderer.xr&&scene.renderer.xr.getSession()){ scene.exitVR(); wait=350; } }catch(e){}
   setTimeout(function(){ location.href='end.html'; },wait);
 }
 elQuit.addEventListener('click',endExperience);
 elPlace.addEventListener('click',function(){ place(true); });
-window.addEventListener('pagehide',stopCam);
+window.addEventListener('pagehide',function(){ stopCam(); Snd.stop(); });
 
 /* ============ 毎フレーム ============ */
 function frame(tMs,dtMs){
@@ -585,7 +812,7 @@ function frame(tMs,dtMs){
   camEl.object3D.getWorldPosition(vCam); headL.copy(vCam); world.worldToLocal(headL);
 
   // 進行
-  if(S.state==='market'&&T-S.tStart>CFG.T_WATER){
+  if(S.state==='market'&&T-S.tStart>CFG.T_WATER&&(glbPending<=0||glbExpired)){
     S.state='water'; S.tWater=T; place(false); waterRig.visible=true;
   }
   if(S.state==='water'){
@@ -647,13 +874,14 @@ function frame(tMs,dtMs){
 
   // 魚
   fish.forEach(function(f){ updateFish(f,dt); });
+  Snd.tick(dt); updSndLabel();
 
   // XR：ヒントは常にこちらを向ける。3Dボタンの表示切り替え
   if(S.xr){
     if(hintMesh&&hintMesh.visible) hintMesh.lookAt(vCam);
     xrButtons.forEach(function(b){ b.mesh.visible=true; });
   }
-  if(!elDbg.hidden) elDbg.textContent=S.state+' sensor:'+(camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor)+' xr:'+S.xr+' t:'+T.toFixed(1);
+  if(!elDbg.hidden) elDbg.textContent=S.state+' sensor:'+(camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor)+' xr:'+S.xr+' t:'+T.toFixed(1)+' snd:'+Snd.state()+' glb:'+glbLog.join(',');
   if(!elMotion.hidden&&camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor) elMotion.hidden=true;
 }
 window.__zkFrame=frame;
@@ -664,6 +892,7 @@ function startExperience(){
   if(!S.built){ S.pending=true; return; }
   S.ready=true; place(true);
   S.state='market'; S.tStart=T;
+  startGlbClock(); Snd.market(true);
   if(!S.xr){
     // iOSで傾きが届かないときだけ、許可ボタンを出す
     setTimeout(function(){
@@ -710,6 +939,7 @@ function init(){
   world=new THREE.Group(); scene.object3D.add(world);
   uiRig=new THREE.Group(); scene.object3D.add(uiRig);
   buildMarket(); buildWater(); buildSea(); buildFish(); buildXrUi();
+  Snd.attempt(); loadGLBs();
   S.marketFade=0; applyMarketFade();
   S.built=true;
   if(S.pending) startExperience();
