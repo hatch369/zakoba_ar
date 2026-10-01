@@ -568,7 +568,33 @@ function buildSchool(){
       p:new THREE.Vector3(), v:new THREE.Vector3(), init:false
     });
   }
-  school = {mesh:mesh, f:fs, N:N, SZ:SZ, CL:CL, state:'idle', launchAt:0, t0:0, base:[0.3+Math.random()*6.28,1.6,3.1,4.6]};
+  school = {mesh:mesh, f:fs, N:N, SZ:SZ, CL:CL, state:'idle', launchAt:0, t0:0, base:[0.3+Math.random()*6.28,1.6,3.1,4.6], uT:{value:0}};
+  loadSardineGLB();
+}
+/* iwashi_small.glb（頭が+Z・長さ0.15m・骨なし）が読めたら、図形のイワシと入れ替える。読めなければ図形のまま */
+function loadSardineGLB(){
+  if(!THREE.GLTFLoader){ glbLog.push('sd:noLoader'); return; }
+  var ld; try{ ld=makeGlbLoader(); }catch(e){ glbLog.push('sd:loaderErr'); return; }
+  fetch('iwashi_small.glb').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
+  .then(function(buf){ return new Promise(function(res,rej){ ld.parse(buf,'',res,rej); }); })
+  .then(function(g){
+    var m=null; g.scene.traverse(function(o){ if(!m&&o.isMesh) m=o; });
+    if(!m||!m.material.map) throw new Error('noMesh');
+    var sc=school, geo=m.geometry, ph=new Float32Array(sc.N);
+    for(var i=0;i<sc.N;i++) ph[i]=sc.f[i].ph;
+    geo.setAttribute('aPh',new THREE.InstancedBufferAttribute(ph,1));   // 個体ごとの尾の振りのずれ
+    var mat=new THREE.MeshStandardMaterial({map:m.material.map, roughness:0.6, metalness:0.1, emissive:0x2a323a, side:THREE.DoubleSide});
+    mat.color.copy(sc.mesh.material.color);
+    mat.onBeforeCompile=function(sh){
+      sh.uniforms.uT=sc.uT;
+      sh.vertexShader=sh.vertexShader
+        .replace('#include <common>','#include <common>\nuniform float uT;\nattribute float aPh;')
+        .replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.x += sin(uT*12.0 - transformed.z*45.0 + aPh*3.0) * 0.011 * pow(clamp(-transformed.z/0.075,0.0,1.0),2.0);');   // 尾を左右に振る
+    };
+    var old=sc.mesh.geometry, oldM=sc.mesh.material;
+    sc.mesh.geometry=geo; sc.mesh.material=mat; old.dispose(); oldM.dispose();
+    glbLog.push('iwashi:ok');
+  }).catch(function(e){ glbLog.push('iwashi:NG('+String((e&&e.message)||e).slice(0,40)+')'); });
 }
 function updateSchool(dt){
   var sc=school; if(!sc) return;
@@ -604,10 +630,11 @@ function updateSchool(dt){
     f.q0x=f.p.x; f.q0y=f.p.y; f.q0z=f.p.z; f.init=true;
     var hz=Math.hypot(f.v.x,f.v.z);
     sdDummy.position.copy(f.p);
-    sdDummy.rotation.set(-Math.atan2(f.v.y,hz||1e-4), Math.atan2(f.v.x,f.v.z)+Math.sin(T*13+f.ph*2)*0.2, Math.sin(T*2.5+f.ph)*0.15, 'YXZ');   // 体をくねらせて泳ぐ
+    sdDummy.rotation.set(-Math.atan2(f.v.y,hz||1e-4), Math.atan2(f.v.x,f.v.z)+Math.sin(T*12+f.ph*3)*0.07, Math.sin(T*2.5+f.ph)*0.15, 'YXZ');   // 体をくねらせて泳ぐ
     sdDummy.scale.setScalar(sc.SZ*lerp(idleSc,1,easeOut(u*1.3))*wk);
     sdDummy.updateMatrix(); sc.mesh.setMatrixAt(i,sdDummy.matrix);
   }
+  sc.uT.value=T;
   sc.mesh.material.color.lerpColors(SD_SIL,SD_WHITE,rising?clamp((T-sc.t0)/1.5,0,1):0);   // 色：飛び出すと銀色へ
   sc.mesh.instanceMatrix.needsUpdate=true;
 }
