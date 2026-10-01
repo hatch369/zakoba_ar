@@ -139,7 +139,9 @@ var CFG = {
   KEEP: 1.05,         // 顔の周り、魚が入らない半径(m)
   SEA_OP_PHONE: 0.88, // 海の球の濃さ（スマホ）
   SEA_OP_AR: 0.5,     // 海の球の濃さ（Quest パススルー）
-  GLB_TIMEOUT: 10     // GLBの読み込みを待つ最大秒数（市場の開始から。超えたら図形の魚で続行）
+  GLB_TIMEOUT: 10,    // GLBの読み込みを待つ最大秒数（市場の開始から。超えたら図形の魚で続行）
+  SARDINES: 240,      // イワシの数（?n_sardine=… で変更。重ければ減らす）
+  SARDINE_SIZE: 1.6   // イワシの大きさの倍率（1.0で約13cm。?sz_sardine=… で変更）
 };
 
 /* ============ 文言（つうじょう／キッズ） ============ */
@@ -519,6 +521,82 @@ function updateFish(f,dt){
   if(ud.flips) ud.flips.forEach(function(pv){ pv.rotation.z=pv.userData.s*Math.sin(T*2.4)*0.5; });
 }
 
+/* ============ イワシの群れ（銀色の小さな魚を InstancedMesh で1回描画） ============ */
+var school = null, sdDummy = new THREE.Object3D(), sdCol = new THREE.Color(), sdA = new THREE.Vector3(), sdB = new THREE.Vector3();
+function buildSchool(){
+  var N = Math.round(qnum('n_sardine', CFG.SARDINES)), SZ = qnum('sz_sardine', CFG.SARDINE_SIZE);
+  // 形：横から見た魚（長さ方向が +Z）。背は青み、腹は銀白
+  var Vt=[[0.06,0],[0.012,0.02],[0.012,-0.017],[-0.04,0],[-0.075,0.022],[-0.075,-0.022]];   // [z,y]
+  var Cl=[[.85,.92,1],[.52,.68,.85],[1,1,1],[.85,.92,1],[.72,.82,.92],[.72,.82,.92]];
+  var Tr=[0,1,2, 1,3,2, 3,4,5], pos=[], col=[];
+  Tr.forEach(function(i){ pos.push(0,Vt[i][1],Vt[i][0]); col.push(Cl[i][0],Cl[i][1],Cl[i][2]); });
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
+  var mesh = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({vertexColors:true, side:THREE.DoubleSide}), N);
+  mesh.frustumCulled = false; mesh.visible = false; mesh.renderOrder = 6;
+  for(var i=0;i<N;i++) mesh.setColorAt(i, SIL);   // 色の領域を先に確保（後から作ると描画に反映されない）
+  world.add(mesh);
+  // 群れを4つに分け、半径と高さの違う渦にする。個体ごとに少しずつずらして、群れらしいまとまりを出す
+  var CL=[{R:1.9,h:0.10,w:0.70},{R:2.4,h:-0.20,w:0.58},{R:2.9,h:0.30,w:0.50},{R:3.5,h:-0.05,w:0.42}];
+  var fs=[];
+  for(var j=0;j<N;j++){
+    var k=j%CL.length, c=CL[k], rnd=Math.random;
+    fs.push({
+      k:k, R:c.R+(rnd()-0.5)*0.55, h:c.h+(rnd()-0.5)*0.9, w:c.w*(0.9+rnd()*0.2),
+      sp:(rnd()-0.5)*1.1,           // 群れの中での、進行方向のずれ(rad)
+      ph:rnd()*6.28, bump:0.8+rnd()*0.7, dly:rnd()*1.4, dur:2.2+rnd()*1.0,
+      br:0.78+rnd()*0.22,           // 個体ごとの明るさ
+      // 水の中での待機（水面の中心まわりの小さな渦）
+      ir:0.25+rnd()*0.65, iw:(0.9+rnd()*0.9), iy:-0.18-rnd()*0.4, ia:rnd()*6.28,
+      p:new THREE.Vector3(), v:new THREE.Vector3(), init:false
+    });
+  }
+  school = {mesh:mesh, f:fs, N:N, SZ:SZ, CL:CL, state:'idle', launchAt:0, t0:0, base:[0.3+Math.random()*6.28,1.6,3.1,4.6]};
+}
+function updateSchool(dt){
+  var sc=school; if(!sc) return;
+  var show=(S.state==='water'||S.state==='popped');
+  sc.mesh.visible=show; if(!show) return;
+  if(sc.state==='idle'&&S.state==='popped'&&T>=sc.launchAt){ sc.state='rise'; sc.t0=T; Snd.splash(0.35); }
+  var yaw=waterRig.rotation.y, cy=Math.cos(yaw), sy=Math.sin(yaw), wx=waterRig.position.x, wz=waterRig.position.z;
+  var rising=(sc.state==='rise'), wk=ease(S.waterK), idleSc=0.55;
+  for(var i=0;i<sc.N;i++){
+    var f=sc.f[i], th, e=0, u=0;
+    // A：水の中の位置（ワールド座標に直す）
+    th=f.iw*T+f.ia;
+    var ax=Math.cos(th)*f.ir, az=Math.sin(th)*f.ir*0.8;
+    sdA.set(wx+ax*cy+az*sy, f.iy+Math.sin(T*1.7+f.ph)*0.04, wz-ax*sy+az*cy);
+    if(rising){
+      u=clamp((T-sc.t0-f.dly)/f.dur,0,1); e=ease(u);
+      // B：顔のまわりの回遊（群れごとに半径・高さ・速さが違う渦）
+      var cl=sc.CL[f.k], g=sc.base[f.k]+cl.w*T+f.sp*(1+0.25*Math.sin(T*0.6+f.k));
+      sdB.set(Math.cos(g)*f.R, S.eyeH+f.h+0.35*Math.sin(g*2+f.k)+Math.sin(T*1.3+f.ph)*0.06, Math.sin(g)*f.R);
+      f.p.x=lerp(sdA.x,sdB.x,e); f.p.z=lerp(sdA.z,sdB.z,e);
+      f.p.y=lerp(sdA.y,sdB.y,e)+Math.sin(Math.PI*e)*f.bump;   // 水面から立ち上がる弧
+    }else{
+      f.p.copy(sdA);
+    }
+    // 顔に近づきすぎない
+    tmpV2.copy(f.p).sub(headL); var d=tmpV2.length();
+    if(d<CFG.KEEP&&d>1e-4){ tmpV2.multiplyScalar(CFG.KEEP/d); f.p.copy(headL).add(tmpV2); }
+    // 向き：進んだ方向（なめらかに）
+    if(f.init&&dt>1e-4){
+      var k2=1-Math.exp(-dt*6);
+      f.v.x+=((f.p.x-f.q0x)/dt-f.v.x)*k2; f.v.y+=((f.p.y-f.q0y)/dt-f.v.y)*k2; f.v.z+=((f.p.z-f.q0z)/dt-f.v.z)*k2;
+    }
+    f.q0x=f.p.x; f.q0y=f.p.y; f.q0z=f.p.z; f.init=true;
+    var hz=Math.hypot(f.v.x,f.v.z);
+    sdDummy.position.copy(f.p);
+    sdDummy.rotation.set(-Math.atan2(f.v.y,hz||1e-4), Math.atan2(f.v.x,f.v.z), Math.sin(T*7+f.ph*3)*0.9, 'YXZ');   // ロールでキラキラ
+    sdDummy.scale.setScalar(sc.SZ*lerp(idleSc,1,easeOut(u*1.3))*wk);
+    sdDummy.updateMatrix(); sc.mesh.setMatrixAt(i,sdDummy.matrix);
+    // 色：水の中は藍のシルエット → 飛び出すと銀色
+    var kc=clamp(u*4,0,1); sdCol.setRGB(f.br,f.br,f.br); sdCol.lerpColors(SIL,sdCol,kc); sc.mesh.setColorAt(i,sdCol);
+  }
+  sc.mesh.instanceMatrix.needsUpdate=true; sc.mesh.instanceColor.needsUpdate=true;
+}
+
 /* ============ GLBの差し込み（失敗・遅延したら図形の魚のまま続行） ============ */
 /* 各モデルは「長さ1・前方+Z」に正規化して使う。向きが逆・横向きなら yaw(度) を調整。
    確認用に URL で上書きもできる：?yaw_tuna=180&yaw_whale=90&sc_turtle=1.2 など */
@@ -627,6 +705,7 @@ function poke(lx,lz){
   spawnRipple(lx,lz,1.0,0.8,2.4,0.25,true);
   spawnRipple(lx,lz,0.85,0.7,2.2,0.5,true);
   var t0=T+0.5;
+  if(school) school.launchAt=t0+0.2;
   fish.forEach(function(f,i){ f.launchAt=t0+i*CFG.STAGGER+(f.d.kind==='whale'?0.5:0); });
 }
 function pokeFromRay(o,d){
@@ -880,6 +959,7 @@ function frame(tMs,dtMs){
 
   // 魚
   fish.forEach(function(f){ updateFish(f,dt); });
+  updateSchool(dt);
   Snd.tick(dt); updSndLabel();
 
   // XR：ヒントは常にこちらを向ける。3Dボタンの表示切り替え
@@ -944,7 +1024,7 @@ scene.addEventListener('exit-vr',function(){
 function init(){
   world=new THREE.Group(); scene.object3D.add(world);
   uiRig=new THREE.Group(); scene.object3D.add(uiRig);
-  buildMarket(); buildWater(); buildSea(); buildFish(); buildXrUi();
+  buildMarket(); buildWater(); buildSea(); buildFish(); buildSchool(); buildXrUi();
   Snd.attempt(); loadGLBs();
   S.marketFade=0; applyMarketFade();
   S.built=true;
