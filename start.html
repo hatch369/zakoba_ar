@@ -199,6 +199,10 @@
   .btn:active{transform:scale(.96);}
   .btn small{display:block;font-family:"Noto Sans JP",sans-serif;font-weight:500;font-size:.68rem;letter-spacing:.1em;margin-top:6px;opacity:.85;}
 
+  .cam-note{margin-top:4px;font-size:.78rem;line-height:1.7;color:#BFE9E4;text-align:center;letter-spacing:.04em;}
+  body.mode-kids .cam-note{font-size:.92rem;font-weight:500;}
+  .cam-note ruby rt{color:#BFE9E4;}
+
   footer{margin-top:24px;font-size:.72rem;color:#BFE9E4;opacity:.6;letter-spacing:.05em;}
 </style>
 </head>
@@ -246,9 +250,11 @@
     
     </div>
     <p class="normal-text">
-      いま座っているこの靱公園は、300年前、大きな魚やクジラまで運ばれてきた
+      いま座っているこの靱公園は、<br>
+      300年前、大きな魚やクジラまで運ばれてきた<br>
       日本一の魚市場「<span class="highlight">雑喉場（ざこば）</span>」でした。<br><br>
-      芝生の下に静かに眠る江戸の海を、少しだけ覗いてみましょう。
+      芝生の下に静かに眠る江戸の海を、<br>
+      少しだけ覗いてみましょう。
     </p>
     <p class="kids-text">
       むかし、ここは <ruby>海<rt>うみ</rt></ruby> でした。<br><br>
@@ -285,6 +291,11 @@
     </a>
   </div>
 
+  <p class="cam-note">
+    <span class="normal-text">次の画面でカメラの許可が求められます</span>
+    <span class="kids-text">つぎの<ruby>画面<rt>がめん</rt></ruby>で カメラの<ruby>許可<rt>きょか</rt></ruby>がでるよ</span>
+  </p>
+
   <footer>靱公園 雑喉場アクアリウム</footer>
 
   <script>
@@ -294,6 +305,18 @@
       document.getElementById('btnKids').classList.toggle('active', mode === 'kids');
       try{ localStorage.setItem('zakoba-mode', mode); }catch(e){}
     }
+    (function(){
+      var btn = document.querySelector('a.btn');
+      btn.addEventListener('click', function(e){
+        var D = window.DeviceOrientationEvent;
+        if(D && typeof D.requestPermission === 'function'){
+          e.preventDefault();
+          var href = btn.href;
+          var go = function(){ location.href = href; };
+          try{ D.requestPermission().then(go, go); }catch(err){ go(); }
+        }
+      });
+    })();
     (function(){
       var saved = null;
       try{ saved = localStorage.getItem('zakoba-mode'); }catch(e){}

@@ -1,77 +1,735 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>雑喉場アクアリウム AR</title>
-    <!-- A-Frame本体 -->
-    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-    <!-- AR.js -->
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
-    <!-- アニメーション再生プラグイン -->
-    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>ざこばアクアリウム - 体験</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+  :root{
+    --paper:#EDE4C9; --ink:#25201A;
+    --sea-mid:#0E5C63; --sea-deep:#062B34; --sea-abyss:#031318;
+    --vermillion:#B6432B; --gold:#A9834E; --foam:#BFE9E4;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  [hidden]{display:none !important;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--sea-abyss);font-family:"Noto Sans JP",sans-serif;touch-action:none;}
+  #camvideo{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;background:var(--sea-abyss);}
+  a-scene{position:fixed !important;inset:0;z-index:1;}
+  ruby rt{font-size:.55em;}
+  body.xr .ui{display:none !important;}
 
-    <style>
-      /* 画面右上に固定表示する終了ボタン */
-      #quit-btn {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 9999;
-        background: rgba(0, 0, 0, 0.6);
-        color: #ffffff;
-        text-decoration: none;
-        padding: 8px 16px;
-        border-radius: 20px;
-        font-size: 14px;
-        font-family: sans-serif;
-        border: 1px solid rgba(255, 255, 255, 0.4);
+  .ui{position:fixed;z-index:20;font-family:"Noto Sans JP",sans-serif;}
+  .pill{border:1px solid rgba(237,228,201,.55);background:rgba(6,43,52,.72);color:var(--paper);padding:9px 16px;border-radius:999px;font-size:.82rem;font-weight:700;letter-spacing:.05em;cursor:pointer;backdrop-filter:blur(3px);}
+  .pill:active{transform:scale(.96);}
+  #quit{top:calc(14px + env(safe-area-inset-top,0px));right:14px;}
+  #place{left:14px;bottom:calc(18px + env(safe-area-inset-bottom,0px));font-weight:500;background:rgba(6,43,52,.55);}
+  #motion{left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--vermillion);border-color:rgba(255,255,255,.4);color:#fff8ee;}
+
+  #hint{left:50%;bottom:calc(86px + env(safe-area-inset-bottom,0px));transform:translate(-50%,10px);opacity:0;transition:opacity .9s ease,transform .9s ease;pointer-events:none;
+    background:rgba(237,228,201,.94);color:var(--ink);border:2px solid var(--gold);border-radius:999px;padding:12px 26px;font-family:"Shippori Mincho B1",serif;font-weight:800;font-size:1.05rem;letter-spacing:.08em;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.35);}
+  #hint.on{opacity:1;transform:translate(-50%,0);}
+  #hint rt{color:#6b5c3f;}
+  body.kids #hint{font-size:1.15rem;}
+
+  #gate{inset:0;background:linear-gradient(180deg,var(--sea-mid),var(--sea-deep) 60%,var(--sea-abyss));display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;z-index:30;}
+  .gate-inner{max-width:360px;}
+  .gate-inner h1{font-family:"Shippori Mincho B1",serif;font-weight:800;font-size:1.7rem;letter-spacing:.14em;color:var(--paper);margin:0 0 22px;}
+  .gate-inner p{color:var(--foam);font-size:.95rem;line-height:1.9;margin:0 0 24px;}
+  body.kids .gate-inner p{font-size:1.08rem;line-height:2.1;}
+  .gate-inner rt{color:var(--foam);}
+  #gateBtn{width:150px;height:150px;border-radius:50%;border:0;background:radial-gradient(circle at 35% 30%,#CB5A3E,var(--vermillion) 70%);color:#fff8ee;font-family:"Shippori Mincho B1",serif;font-weight:700;font-size:1.05rem;line-height:1.5;letter-spacing:.06em;box-shadow:0 10px 24px rgba(0,0,0,.35),inset 0 0 0 4px rgba(255,255,255,.15);cursor:pointer;padding:12px;}
+  #gateBtn:active{transform:scale(.96);}
+  #dbg{left:8px;top:calc(8px + env(safe-area-inset-top,0px));color:#9ff;font:11px/1.4 monospace;background:rgba(0,0,0,.45);padding:3px 6px;pointer-events:none;}
+
+  @media (prefers-reduced-motion:reduce){ #hint{transition:none;} }
+</style>
+<script>
+/* ---- 傾きセンサーで視点を回す（iOS許可の扱いを自前で制御するため look-controls は使わない） ---- */
+AFRAME.registerComponent('gyro-look',{
+  init:function(){
+    var THREE=AFRAME.THREE, self=this;
+    this.hasSensor=false; this.a=0; this.b=0; this.g=0; this.yaw=0; this.pitch=0;
+    this.euler=new THREE.Euler(); this.q1=new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
+    this.q0=new THREE.Quaternion(); this.zee=new THREE.Vector3(0,0,1);
+    this.el.object3D.position.set(0,1.1,0);
+    window.addEventListener('deviceorientation',function(e){
+      if(e.alpha===null||e.beta===null||e.alpha===undefined) return;
+      self.hasSensor=true; self.a=e.alpha; self.b=e.beta; self.g=e.gamma;
+    },true);
+    // センサーがない端末（PCでの確認用）：ドラッグで見回す
+    var down=false,lx=0,ly=0;
+    window.addEventListener('pointerdown',function(e){down=true;lx=e.clientX;ly=e.clientY;});
+    window.addEventListener('pointermove',function(e){
+      if(!down||self.hasSensor) return;
+      self.yaw-=(e.clientX-lx)*0.005;
+      self.pitch=Math.max(-1.5,Math.min(1.5,self.pitch-(e.clientY-ly)*0.005));
+      lx=e.clientX;ly=e.clientY;
+    });
+    window.addEventListener('pointerup',function(){down=false;});
+  },
+  tick:function(){
+    var sc=this.el.sceneEl;
+    if(sc.is('vr-mode')||sc.is('ar-mode')) return;   // XR中は端末の姿勢追跡に任せる
+    var q=this.el.object3D.quaternion, D=Math.PI/180;
+    if(this.hasSensor){
+      var orient=((screen.orientation&&screen.orientation.angle)||window.orientation||0)*D;
+      this.euler.set(this.b*D,this.a*D,-this.g*D,'YXZ');
+      q.setFromEuler(this.euler); q.multiply(this.q1); q.multiply(this.q0.setFromAxisAngle(this.zee,-orient));
+    }else{
+      this.euler.set(this.pitch,this.yaw,0,'YXZ'); q.setFromEuler(this.euler);
+    }
+  }
+});
+AFRAME.registerComponent('zk-loop',{ tick:function(t,dt){ if(window.__zkFrame) window.__zkFrame(t,dt); } });
+</script>
+</head>
+<body>
+
+<video id="camvideo" playsinline muted autoplay></video>
+
+<a-scene id="scene"
+  vr-mode-ui="enabled: false"
+  device-orientation-permission-ui="enabled: false"
+  loading-screen="enabled: false"
+  renderer="alpha: true; antialias: true"
+  webxr="optionalFeatures: local-floor, bounded-floor; referenceSpaceType: local-floor">
+  <a-entity id="cam3d" camera="fov: 70; near: 0.05; far: 60" gyro-look></a-entity>
+  <a-entity light="type: ambient; color: #ffffff; intensity: 1.1"></a-entity>
+  <a-entity light="type: directional; color: #ffffff; intensity: 1.2" position="1 3 1.5"></a-entity>
+  <a-entity id="ctlL" laser-controls="hand: left" raycaster="objects: .none"></a-entity>
+  <a-entity id="ctlR" laser-controls="hand: right" raycaster="objects: .none"></a-entity>
+  <a-entity zk-loop></a-entity>
+</a-scene>
+
+<button id="quit" class="ui pill" type="button"></button>
+<button id="place" class="ui pill" type="button"></button>
+<div id="hint" class="ui"></div>
+<button id="motion" class="ui pill" type="button" hidden></button>
+<div id="dbg" class="ui" hidden></div>
+
+<div id="gate" class="ui">
+  <div class="gate-inner">
+    <h1>ざこばアクアリウム</h1>
+    <p id="gateMsg"></p>
+    <button id="gateBtn" type="button" hidden></button>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var THREE = AFRAME.THREE;
+
+/* ============ 調整用パラメータ ============ */
+var CFG = {
+  DIST: 1.6,          // 目線から水面までの距離(m)
+  EYE_H: 1.1,         // 座った目線の高さ(m)
+  FOV: 70,
+  WATER_R: 1.3,       // 水面の半径(m)
+  T_WATER: 4.0,       // 市場の場面を見せる秒数（この後に水面が出る）
+  T_HINT: 3.0,        // 魚影が泳ぎ始めてからヒントまで
+  T_GLOW: 10.0,       // 魚影が泳ぎ始めてから、波紋を光らせるまで
+  STAGGER: 0.3,       // 飛び出しの間隔(秒)
+  KEEP: 1.05,         // 顔の周り、魚が入らない半径(m)
+  SEA_OP_PHONE: 0.88, // 海の球の濃さ（スマホ）
+  SEA_OP_AR: 0.5      // 海の球の濃さ（Quest パススルー）
+};
+
+/* ============ 文言（つうじょう／キッズ） ============ */
+var kids = false;
+try{ kids = localStorage.getItem('zakoba-mode') === 'kids'; }catch(e){}
+document.body.classList.toggle('kids', kids);
+function P(n,k){ return kids ? k : n; }
+var TXT = {
+  quit:  P([{t:'体験をおわる'}],[{t:'体験',r:'たいけん'},{t:'を おわる'}]),
+  place: P([{t:'位置をなおす'}],[{t:'位置',r:'いち'},{t:'を なおす'}]),
+  hint:  P([{t:'水面にふれてみよう'}],[{t:'水面',r:'すいめん'},{t:'に ふれてみよう'}]),
+  start: P([{t:'タップして'},{t:'はじめる'}],[{t:'タップして'},{t:' はじめよう'}]),
+  camLoading: P([{t:'カメラをひらいています…'}],[{t:'カメラを ひらいているよ…'}]),
+  camDeny: P([{t:'カメラが使えませんでした。許可を確認して、もう一度タップしてください。'}],
+             [{t:'カメラが つかえなかったよ。'},{t:'許可',r:'きょか'},{t:'を えらんで、もういちど タップしてね。'}]),
+  quest: P([{t:'ARをはじめます。ボタンを押してください。'}],[{t:'ARを はじめるよ。ボタンを おしてね。'}]),
+  noXR:  P([{t:'このブラウザでは、ARをはじめられませんでした。もう一度お試しください。'}],
+           [{t:'ARを はじめられなかったよ。もういちど ためしてね。'}]),
+  motion:P([{t:'傾きセンサーを許可'}],[{t:'スマホの '},{t:'傾',r:'かたむ'},{t:'きを つかう'}])
+};
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function H(segs){ return segs.map(function(s){ return s.r ? '<ruby>'+esc(s.t)+'<rt>'+esc(s.r)+'</rt></ruby>' : esc(s.t); }).join(''); }
+function plain(segs){ return segs.map(function(s){return s.t+(s.r||'');}).join(''); }
+
+/* ============ DOM ============ */
+var $ = function(id){ return document.getElementById(id); };
+var scene = $('scene'), camEl = $('cam3d'), vid = $('camvideo');
+var elQuit=$('quit'), elPlace=$('place'), elHint=$('hint'), elMotion=$('motion'), elGate=$('gate'), elGateMsg=$('gateMsg'), elGateBtn=$('gateBtn'), elDbg=$('dbg');
+elQuit.innerHTML = H(TXT.quit); elPlace.innerHTML = H(TXT.place); elHint.innerHTML = H(TXT.hint); elMotion.innerHTML = H(TXT.motion);
+if(/[?&]debug/.test(location.search)) elDbg.hidden = false;
+
+var isQuest = /OculusBrowser|Quest/i.test(navigator.userAgent);
+var needMotionPerm = (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function');
+function requestMotion(){
+  if(!needMotionPerm) return Promise.resolve('granted');
+  try{ return DeviceOrientationEvent.requestPermission().catch(function(){ return 'denied'; }); }catch(e){ return Promise.resolve('denied'); }
+}
+var gateHandler = null;
+function showGate(msgSegs, btnSegs, onClick){
+  elGate.hidden = false;
+  elGateMsg.innerHTML = H(msgSegs);
+  if(btnSegs){ elGateBtn.hidden = false; elGateBtn.innerHTML = H(btnSegs); } else { elGateBtn.hidden = true; }
+  gateHandler = onClick || null;
+}
+function hideGate(){ elGate.hidden = true; }
+elGateBtn.addEventListener('click', function(){ if(gateHandler) gateHandler(); });
+
+/* ============ 小物 ============ */
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function ease(u){ u=clamp(u,0,1); return u*u*(3-2*u); }
+function easeOut(u){ return 1-Math.pow(1-clamp(u,0,1),3); }
+function lerp(a,b,k){ return a+(b-a)*k; }
+function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+function mkTex(c){ var t=new THREE.CanvasTexture(c); if(THREE.SRGBColorSpace) t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; return t; }
+function mkCanvas(w,h){ var c=document.createElement('canvas'); c.width=w; c.height=h; return c; }
+var SANS='"Noto Sans JP","Hiragino Sans","Yu Gothic",sans-serif';
+var MINCHO='"Shippori Mincho B1","Hiragino Mincho ProN","Yu Mincho",serif';
+
+/* ふりがな付きの文字ラベル（Quest用の3Dボタン・ヒント） */
+function labelTexture(segs,o){
+  o = Object.assign({font:56,padX:40,padY:24,bg:'rgba(237,228,201,0.96)',fg:'#25201A',border:'#A9834E'},o||{});
+  var c=document.createElement('canvas'), ctx=c.getContext('2d');
+  var hasR=segs.some(function(s){return s.r;}), rf=Math.round(o.font*0.42), top=hasR?rf+8:0;
+  ctx.font='700 '+o.font+'px '+SANS;
+  var ws=segs.map(function(s){return ctx.measureText(s.t).width;});
+  var tw=ws.reduce(function(a,b){return a+b;},0);
+  c.width=Math.ceil(tw+o.padX*2); c.height=Math.ceil(o.font*1.25+o.padY*2+top);
+  rr(ctx,3,3,c.width-6,c.height-6,26); ctx.fillStyle=o.bg; ctx.fill(); ctx.lineWidth=5; ctx.strokeStyle=o.border; ctx.stroke();
+  var x=o.padX, by=o.padY+top+o.font;
+  segs.forEach(function(s,i){
+    ctx.font='700 '+o.font+'px '+SANS; ctx.fillStyle=o.fg; ctx.textAlign='left'; ctx.fillText(s.t,x,by-o.font*0.18);
+    if(s.r){ ctx.font='700 '+rf+'px '+SANS; ctx.textAlign='center'; ctx.fillText(s.r,x+ws[i]/2,o.padY+rf); }
+    x+=ws[i];
+  });
+  return {tex:mkTex(c), aspect:c.width/c.height};
+}
+
+/* ============ 状態 ============ */
+var S = { built:false, ready:false, pending:false, state:'boot', eyeH:CFG.EYE_H, xr:false,
+  tStart:0, tWater:0, waterK:0, hintShown:false, glow:false,
+  marketFade:0, marketTarget:1, seaK:0, seaT0:-1, discFade:1, seaMax:CFG.SEA_OP_PHONE };
+var T = 0;
+var world, uiRig, waterRig, marketGroup, seaMesh, raysGroup, bubbles, waveRing, disc, glowDisc, hintMesh;
+var xrButtons = [], ripples = [], sways = [], fish = [], marketMats = [];
+var stream = null;
+
+var vCam=new THREE.Vector3(), qCam=new THREE.Quaternion(), vFwd=new THREE.Vector3(), vUp=new THREE.Vector3();
+var headL=new THREE.Vector3(), tmpV=new THREE.Vector3(), tmpV2=new THREE.Vector3(), tmpDir=new THREE.Vector3();
+var m4=new THREE.Matrix4(), qT=new THREE.Quaternion(), ZERO=new THREE.Vector3(), UPV=new THREE.Vector3(0,1,0);
+var RC=new THREE.Raycaster();
+
+/* ============ 位置合わせ ============ */
+function place(full){
+  camEl.object3D.getWorldPosition(vCam);
+  camEl.object3D.getWorldQuaternion(qCam);
+  vFwd.set(0,0,-1).applyQuaternion(qCam); vUp.set(0,1,0).applyQuaternion(qCam);
+  var hx=vFwd.x, hz=vFwd.z;
+  if(Math.hypot(hx,hz)<0.4){ var sg=vFwd.y<0?1:-1; hx=vUp.x*sg; hz=vUp.z*sg; } // 真下を見ているときは、端末の「上」が前
+  var yaw=Math.atan2(-hx,-hz), n=Math.hypot(hx,hz)||1; hx/=n; hz/=n;
+  if(full){
+    S.eyeH = clamp(vCam.y,0.6,1.7);
+    world.position.set(vCam.x,0,vCam.z);
+    seaMesh.position.y = S.eyeH; raysGroup.position.y = S.eyeH;
+  }
+  var d=Math.sqrt(Math.max(CFG.DIST*CFG.DIST-S.eyeH*S.eyeH,0.36));
+  waterRig.position.set(hx*d,0,hz*d); waterRig.rotation.y=yaw;
+  uiRig.position.set(world.position.x,0,world.position.z); uiRig.rotation.y=yaw;
+  xrButtons.forEach(function(b){ b.mesh.position.set(b.x,S.eyeH-0.5,b.z); });
+}
+
+/* ============ 市場（コードで描く：のぼり・暖簾・屋台・提灯） ============ */
+function regM(m){ m.transparent=true; marketMats.push({m:m,base:m.opacity}); return m; }
+function polar(deg,r){ var a=deg*Math.PI/180; return new THREE.Vector3(Math.sin(a)*r,0,-Math.cos(a)*r); }
+var G = {
+  sph:new THREE.SphereGeometry(1,14,10), cone:new THREE.ConeGeometry(1,1,6),
+  box:new THREE.BoxGeometry(1,1,1), cyl:new THREE.CylinderGeometry(1,1,1,8)
+};
+G.coneZ = new THREE.ConeGeometry(1,1,6); G.coneZ.rotateX(Math.PI/2);   // 先端が +Z
+function addMesh(parent,geo,mat,pos,scl){
+  var m=new THREE.Mesh(geo,mat); if(pos) m.position.set(pos[0],pos[1],pos[2]); if(scl) m.scale.set(scl[0],scl[1],scl[2]); parent.add(m); return m;
+}
+function clothTex(ch,bg,fg){
+  var c=mkCanvas(256,360), x=c.getContext('2d');
+  x.fillStyle=bg; x.fillRect(0,0,256,360);
+  x.strokeStyle='#A9834E'; x.lineWidth=6; x.strokeRect(10,10,236,340);
+  x.fillStyle=fg; x.font='800 190px '+MINCHO; x.textAlign='center'; x.textBaseline='middle'; x.fillText(ch,128,190);
+  return mkTex(c);
+}
+function noboriTex(text,bg,fg){
+  var c=mkCanvas(128,512), x=c.getContext('2d'), n=text.length;
+  x.fillStyle=bg; x.fillRect(0,0,128,512);
+  x.strokeStyle='#A9834E'; x.lineWidth=5; x.strokeRect(6,6,116,500);
+  var fs=Math.min(96,(512-70)/n);
+  x.fillStyle=fg; x.font='800 '+fs+'px '+MINCHO; x.textAlign='center'; x.textBaseline='middle';
+  for(var i=0;i<n;i++) x.fillText(text.charAt(i),64,40+(512-80)*(i+0.5)/n);
+  return mkTex(c);
+}
+function buildMarket(){
+  var g = marketGroup = new THREE.Group(); world.add(g);
+  var wood=regM(new THREE.MeshLambertMaterial({color:0x7A5A3C}));
+  var woodD=regM(new THREE.MeshLambertMaterial({color:0x4A3524}));
+  var silver=regM(new THREE.MeshLambertMaterial({color:0xC9D3D6}));
+  var goldM=regM(new THREE.MeshLambertMaterial({color:0xA9834E}));
+  var lantM=regM(new THREE.MeshBasicMaterial({color:0xC9482B}));
+  var chars=['雑','喉','場'];
+  var norenMats=chars.map(function(ch,i){ return regM(new THREE.MeshBasicMaterial({map:clothTex(ch,i===1?'#B6432B':'#1B3A5C','#EDE4C9'),side:THREE.DoubleSide})); });
+  var norenGeo=new THREE.PlaneGeometry(0.5,0.72);
+
+  // 屋台（中心を向く）
+  [-62,62,-125,125,180].forEach(function(a){
+    var st=new THREE.Group(); st.position.copy(polar(a,3.3)); g.add(st); st.lookAt(0,0,0);
+    addMesh(st,G.box,wood,[0,0.375,0],[1.7,0.75,0.6]);
+    for(var i=0;i<5;i++){ var f=addMesh(st,G.sph,silver,[-0.6+i*0.3,0.8,0.05],[0.14,0.035,0.05]); f.rotation.y=(i%2?0.3:-0.2); }
+    [-1,1].forEach(function(s){ addMesh(st,G.cyl,woodD,[s*0.9,1.05,0.2],[0.04,2.1,0.04]); });
+    addMesh(st,G.box,woodD,[0,2.07,0.2],[1.95,0.07,0.07]);
+    for(var j=0;j<3;j++){
+      var pv=new THREE.Group(); pv.position.set(-0.55+j*0.55,2.04,0.24); st.add(pv);
+      addMesh(pv,norenGeo,norenMats[j],[0,-0.36,0]);
+      sways.push({o:pv,ax:'x',ph:Math.random()*6,f:1.3+Math.random()*0.6,amp:0.1});
+    }
+  });
+  // のぼり
+  var nTexts=['雑喉場','大漁','鮮魚','活魚'], nBg=['#B6432B','#1B3A5C','#1B3A5C','#B6432B'];
+  var nMats=nTexts.map(function(t,i){ return regM(new THREE.MeshBasicMaterial({map:noboriTex(t,nBg[i],'#EDE4C9'),side:THREE.DoubleSide})); });
+  var nGeo=new THREE.PlaneGeometry(0.5,1.9);
+  [-20,20,-45,45,-95,95,-155,155].forEach(function(a,i){
+    var gp=new THREE.Group(); gp.position.copy(polar(a,4.1)); g.add(gp); gp.lookAt(0,0,0);
+    addMesh(gp,G.cyl,woodD,[0,1.3,0],[0.025,2.6,0.025]);
+    var pv=new THREE.Group(); pv.position.set(0,2.5,0); gp.add(pv);
+    addMesh(pv,nGeo,nMats[i%4],[0.27,-0.95,0]);
+    sways.push({o:pv,ax:'y',ph:Math.random()*6,f:1.5+Math.random()*0.8,amp:0.32});
+  });
+  // 提灯
+  [-10,35,80,-80,140,-140].forEach(function(a,i){
+    var l=new THREE.Group(); l.position.copy(polar(a,3.0)); l.position.y=2.3; g.add(l);
+    addMesh(l,G.sph,lantM,[0,0,0],[0.17,0.21,0.17]);
+    addMesh(l,G.cyl,goldM,[0,0.21,0],[0.07,0.04,0.07]);
+    sways.push({o:l,ax:'z',ph:i*1.7,f:1.1,amp:0.06});
+  });
+}
+function applyMarketFade(){
+  marketMats.forEach(function(r){ r.m.opacity=r.base*S.marketFade; });
+  marketGroup.visible = S.marketFade>0.003;
+}
+
+/* ============ 水面 ============ */
+function buildWater(){
+  var R=CFG.WATER_R;
+  waterRig=new THREE.Group(); waterRig.visible=false; world.add(waterRig);
+  var c=mkCanvas(256,256), x=c.getContext('2d');
+  var gr=x.createRadialGradient(128,110,10,128,128,126);
+  gr.addColorStop(0,'rgba(24,120,128,0.55)'); gr.addColorStop(0.7,'rgba(8,70,82,0.62)'); gr.addColorStop(1,'rgba(5,45,51,0)');
+  x.fillStyle=gr; x.fillRect(0,0,256,256);
+  disc=new THREE.Mesh(new THREE.CircleGeometry(R,64), new THREE.MeshBasicMaterial({map:mkTex(c),transparent:true,depthWrite:false,opacity:0}));
+  disc.rotation.x=-Math.PI/2; disc.position.y=0.005; disc.renderOrder=2; waterRig.add(disc);
+  var edge=new THREE.Mesh(new THREE.RingGeometry(R*0.96,R*0.99,64), new THREE.MeshBasicMaterial({color:0xBFE9E4,transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide}));
+  edge.rotation.x=-Math.PI/2; edge.position.y=0.01; edge.renderOrder=3; disc.userData.edge=edge; waterRig.add(edge);
+  glowDisc=new THREE.Mesh(new THREE.CircleGeometry(R*0.95,48), new THREE.MeshBasicMaterial({color:0xBFE9E4,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending}));
+  glowDisc.rotation.x=-Math.PI/2; glowDisc.position.y=0.012; glowDisc.renderOrder=3; waterRig.add(glowDisc);
+  for(var i=0;i<14;i++){
+    var m=new THREE.Mesh(new THREE.RingGeometry(0.9,1,64), new THREE.MeshBasicMaterial({color:0xBFE9E4,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false}));
+    m.rotation.x=-Math.PI/2; m.position.y=0.02; m.visible=false; m.renderOrder=4; waterRig.add(m);
+    ripples.push({m:m,age:0,life:2.4,R:1,peak:0.8,delay:0,on:false});
+  }
+}
+function spawnRipple(x,z,R,peak,life,delay,bright){
+  for(var i=0;i<ripples.length;i++){ var r=ripples[i]; if(r.on) continue;
+    r.on=true; r.age=0; r.R=R; r.peak=peak; r.life=life; r.delay=delay||0; r.m.position.x=x; r.m.position.z=z;
+    r.m.material.color.setHex(bright?0xE6FFFB:0xBFE9E4); return; }
+}
+
+/* ============ 海（球・光の筋・泡・広がる波） ============ */
+function buildSea(){
+  var c=mkCanvas(4,256), x=c.getContext('2d'), gr=x.createLinearGradient(0,0,0,256);
+  gr.addColorStop(0,'#2AA9AD'); gr.addColorStop(0.45,'#0E6C74'); gr.addColorStop(1,'#041F27');
+  x.fillStyle=gr; x.fillRect(0,0,4,256);
+  seaMesh=new THREE.Mesh(new THREE.SphereGeometry(9,32,24), new THREE.MeshBasicMaterial({map:mkTex(c),side:THREE.BackSide,transparent:true,opacity:0,depthWrite:false}));
+  seaMesh.renderOrder=-10; seaMesh.visible=false; seaMesh.position.y=S.eyeH; world.add(seaMesh);
+
+  // 光の筋
+  var rc=mkCanvas(64,256), rx=rc.getContext('2d'), g1=rx.createLinearGradient(0,0,0,256);
+  g1.addColorStop(0,'rgba(220,255,250,1)'); g1.addColorStop(1,'rgba(220,255,250,0)'); rx.fillStyle=g1; rx.fillRect(0,0,64,256);
+  rx.globalCompositeOperation='destination-in';
+  var g2=rx.createLinearGradient(0,0,64,0); g2.addColorStop(0,'rgba(0,0,0,0)'); g2.addColorStop(0.5,'rgba(0,0,0,1)'); g2.addColorStop(1,'rgba(0,0,0,0)');
+  rx.fillStyle=g2; rx.fillRect(0,0,64,256);
+  var rayTex=mkTex(rc);
+  raysGroup=new THREE.Group(); raysGroup.visible=false; raysGroup.position.y=S.eyeH; world.add(raysGroup);
+  for(var i=0;i<8;i++){
+    var a=i/8*Math.PI*2+0.3, r=3+(i%3)*1.1;
+    var pl=new THREE.Mesh(new THREE.PlaneGeometry(0.7+(i%3)*0.25,7), new THREE.MeshBasicMaterial({map:rayTex,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
+    pl.position.set(Math.cos(a)*r,2.2,Math.sin(a)*r); pl.lookAt(0,2.2,0); pl.rotation.z+=0.14; pl.userData.ph=i*0.9;
+    raysGroup.add(pl);
+  }
+  // 泡
+  var dc=mkCanvas(64,64), dx=dc.getContext('2d'), dg=dx.createRadialGradient(32,32,2,32,32,30);
+  dg.addColorStop(0,'rgba(255,255,255,0.95)'); dg.addColorStop(0.5,'rgba(210,250,245,0.5)'); dg.addColorStop(1,'rgba(210,250,245,0)');
+  dx.fillStyle=dg; dx.fillRect(0,0,64,64);
+  var N=140, pos=new Float32Array(N*3), bx=new Float32Array(N), bz=new Float32Array(N), bv=new Float32Array(N);
+  for(var k=0;k<N;k++){ var aa=Math.random()*Math.PI*2, rr2=0.8+Math.random()*5; bx[k]=Math.cos(aa)*rr2; bz[k]=Math.sin(aa)*rr2; bv[k]=0.15+Math.random()*0.3; pos[k*3]=bx[k]; pos[k*3+1]=Math.random()*4; pos[k*3+2]=bz[k]; }
+  var geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  bubbles=new THREE.Points(geo,new THREE.PointsMaterial({map:mkTex(dc),size:0.09,transparent:true,opacity:0,depthWrite:false,sizeAttenuation:true}));
+  bubbles.frustumCulled=false; bubbles.visible=false; bubbles.userData={bx:bx,bz:bz,bv:bv}; world.add(bubbles);
+
+  // 水面から外へ広がる波
+  waveRing=new THREE.Mesh(new THREE.RingGeometry(0.8,1,64), new THREE.MeshBasicMaterial({color:0xBFE9E4,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
+  waveRing.rotation.x=-Math.PI/2; waveRing.visible=false; waveRing.renderOrder=5; world.add(waveRing);
+}
+function startSea(){
+  if(S.seaT0>=0) return;
+  S.seaT0=T; S.marketTarget=0;
+  seaMesh.visible=true; raysGroup.visible=true; bubbles.visible=true;
+  waveRing.visible=true; waveRing.position.set(waterRig.position.x,0.03,waterRig.position.z);
+  S.seaMax = (scene.is('ar-mode')) ? CFG.SEA_OP_AR : CFG.SEA_OP_PHONE;
+}
+
+/* ============ 魚（第1段階：図形の魚。第2段階でGLBに差し替え） ============ */
+var SIL=new THREE.Color(0x0A1B45);   // 藍のシルエット
+function part(parent,geo,color,pos,scl){
+  var mat=new THREE.MeshLambertMaterial({color:color,emissive:0x000000});
+  var m=new THREE.Mesh(geo,mat); m.position.set(pos[0],pos[1],pos[2]); m.scale.set(scl[0],scl[1],scl[2]);
+  m.userData.base=new THREE.Color(color); parent.add(m); return m;
+}
+function tintFish(o,k){
+  o.traverse(function(m){ if(m.isMesh&&m.userData.base){ m.material.color.copy(SIL).lerp(m.userData.base,k); m.material.emissive.copy(m.userData.base).multiplyScalar(0.18*k); } });
+}
+function makeTuna(){
+  var g=new THREE.Group();
+  part(g,G.sph,0x4B7BA8,[0,0.01,0.04],[0.12,0.15,0.46]);
+  part(g,G.sph,0xD6E4EA,[0,-0.05,0.04],[0.105,0.09,0.42]);
+  part(g,G.cone,0x2E5A82,[0,0.17,0.02],[0.025,0.14,0.2]);
+  var tail=new THREE.Group(); tail.position.set(0,0,-0.42); g.add(tail);
+  part(tail,G.sph,0x4B7BA8,[0,0,-0.1],[0.06,0.08,0.16]);
+  part(tail,G.coneZ,0x2E5A82,[0,0,-0.3],[0.03,0.2,0.2]);
+  g.userData.tail=tail; return g;
+}
+function makeTurtle(){
+  var g=new THREE.Group();
+  part(g,G.sph,0x6F7D3C,[0,0.05,0],[0.38,0.17,0.46]);
+  part(g,G.sph,0xD9CF9A,[0,-0.035,0],[0.33,0.08,0.4]);
+  part(g,G.sph,0x9FB06A,[0,0.02,0.55],[0.1,0.09,0.13]);
+  var flips=[];
+  [-1,1].forEach(function(s){
+    var pv=new THREE.Group(); pv.position.set(s*0.3,0,0.2); g.add(pv);
+    part(pv,G.sph,0x9FB06A,[s*0.2,0,0],[0.26,0.025,0.1]); pv.userData.s=s; flips.push(pv);
+    part(g,G.sph,0x9FB06A,[s*0.24,-0.01,-0.34],[0.12,0.022,0.09]);
+  });
+  g.userData.flips=flips; return g;
+}
+function makeWhale(){
+  var g=new THREE.Group();
+  part(g,G.sph,0x5C7C99,[0,0.02,0.05],[0.16,0.16,0.48]);
+  part(g,G.sph,0xC9D6DD,[0,-0.07,0.05],[0.145,0.09,0.44]);
+  var tail=new THREE.Group(); tail.position.set(0,0,-0.4); g.add(tail);
+  part(tail,G.sph,0x5C7C99,[0,0,-0.12],[0.07,0.08,0.22]);
+  part(tail,G.coneZ,0x4C6A86,[0,0,-0.4],[0.3,0.02,0.14]);
+  [-1,1].forEach(function(s){ part(g,G.sph,0x4C6A86,[s*0.17,-0.1,0.2],[0.16,0.015,0.05]).rotation.z=s*0.5; });
+  g.userData.tail=tail; return g;
+}
+/* 小さい魚から順に出て、最後にクジラ */
+var FISH_DEF = [
+  {kind:'tuna',  make:makeTuna,  len:1.0, sil:0.5,  apex:2.3, dur:1.8, orb:{r:1.3,h:0.15,speed:0.9,dir:1,alpha:-1.9}, ip:{a:0.62,b:0.40,w:0.9, ph:0.0,y:-0.32}, tf:[9,0.35]},
+  {kind:'tuna',  make:makeTuna,  len:1.0, sil:0.5,  apex:2.4, dur:1.8, orb:{r:1.7,h:-0.35,speed:0.8,dir:-1,alpha:-1.2}, ip:{a:0.50,b:0.52,w:-0.8,ph:2.1,y:-0.40}, tf:[9,0.35]},
+  {kind:'tuna',  make:makeTuna,  len:1.0, sil:0.5,  apex:2.5, dur:1.9, orb:{r:2.1,h:0.5, speed:0.85,dir:1,alpha:-1.57}, ip:{a:0.70,b:0.30,w:1.0, ph:4.0,y:-0.28}, tf:[9,0.35]},
+  {kind:'turtle',make:makeTurtle,len:0.9, sil:0.5,  apex:2.2, dur:2.4, orb:{r:1.5,h:-0.45,speed:0.35,dir:-1,alpha:-1.35}, ip:{a:0.45,b:0.45,w:0.5, ph:1.0,y:-0.50}, tf:null},
+  {kind:'whale', make:makeWhale, len:3.6, sil:0.26, apex:2.9, dur:3.4, orb:{r:2.5,h:0.35,speed:0.55,dir:1,alpha:-1.75},  ip:{a:0.55,b:0.34,w:0.45,ph:0.5,y:-1.00}, tf:[1.6,0.2]}
+];
+function buildFish(){
+  FISH_DEF.forEach(function(d,i){
+    var o=d.make(); tintFish(o,0); o.scale.setScalar(0.0001); waterRig.add(o);
+    fish.push({d:d,obj:o,state:'idle',ph:i*1.3,launchAt:0,t0:0,dur:d.dur,ip:d.ip,orb:{r:d.orb.r,h:d.orb.h,dir:d.orb.dir,alpha:d.orb.alpha,w:d.orb.speed/d.orb.r},
+      theta0:0,S:new THREE.Vector3(),C:new THREE.Vector3(),Tp:new THREE.Vector3(),prev:new THREE.Vector3(),last:new THREE.Vector3()});
+  });
+}
+function orbitPos(f,t,out){
+  var o=f.orb, th=f.theta0+o.dir*o.w*t;
+  return out.set(Math.cos(th)*o.r, S.eyeH+o.h+Math.sin(t*0.7+f.ph)*0.1, Math.sin(th)*o.r);
+}
+function faceDir(obj,dir,dt,rate){
+  if(dir.lengthSq()<1e-9) return;
+  m4.lookAt(dir,ZERO,UPV); qT.setFromRotationMatrix(m4);
+  obj.quaternion.slerp(qT,1-Math.exp(-dt*rate));
+}
+function keepOut(p){
+  tmpV2.copy(p).sub(headL); var d=tmpV2.length();
+  if(d<CFG.KEEP&&d>1e-4){ tmpV2.multiplyScalar(CFG.KEEP/d); p.copy(headL).add(tmpV2); }
+}
+function launch(f){
+  f.state='fly'; f.t0=T; var o=f.obj;
+  spawnRipple(f.last.x,f.last.z,0.55,0.9,1.6,0,true);   // しぶき
+  world.attach(o);
+  f.S.copy(o.position); f.S.y=-0.25;
+  var tA=T+f.dur; f.theta0=f.orb.alpha-f.orb.dir*f.orb.w*tA;
+  orbitPos(f,tA,f.Tp);
+  f.C.set((f.S.x+f.Tp.x)/2, 2*(f.d.apex-(f.S.y+f.Tp.y)/4), (f.S.z+f.Tp.z)/2);
+  f.prev.copy(f.S);
+  startSea();
+}
+function updateFish(f,dt){
+  var o=f.obj, d=f.d;
+  if(f.state==='idle'){
+    var a=f.ip, ang=a.w*T+a.ph;
+    f.last.set(a.a*Math.cos(ang),0,a.b*Math.sin(ang));
+    o.position.set(f.last.x,a.y+Math.sin(T*0.9+a.ph)*0.04,f.last.z);
+    tmpDir.set(-a.a*Math.sin(ang)*a.w,0,a.b*Math.cos(ang)*a.w);
+    faceDir(o,tmpDir,dt,6);
+    o.scale.setScalar(Math.max(0.0001,d.sil*ease(S.waterK)));
+  }else{
+    f.prev.copy(o.position);
+    if(f.state==='fly'){
+      var u=(T-f.t0)/f.dur;
+      if(u>=1){ f.state='orbit'; }
+      else{
+        var v=1-u;
+        o.position.set(v*v*f.S.x+2*v*u*f.C.x+u*u*f.Tp.x, v*v*f.S.y+2*v*u*f.C.y+u*u*f.Tp.y, v*v*f.S.z+2*v*u*f.C.z+u*u*f.Tp.z);
+        o.scale.setScalar(lerp(d.sil,d.len,easeOut(u*1.3)));
+        tintFish(o,clamp((T-f.t0)/0.5,0,1));   // 飛び出した瞬間に元の色へ
       }
-    </style>
+    }
+    if(f.state==='orbit'){
+      orbitPos(f,T,o.position); o.scale.setScalar(d.len); tintFish(o,1);
+    }
+    keepOut(o.position);
+    tmpDir.copy(o.position).sub(f.prev); faceDir(o,tmpDir,dt,7);
+  }
+  var ud=o.userData;
+  if(ud.tail&&d.tf) ud.tail.rotation.y=Math.sin(T*d.tf[0]+f.ph)*d.tf[1];
+  if(ud.flips) ud.flips.forEach(function(pv){ pv.rotation.z=pv.userData.s*Math.sin(T*2.4)*0.5; });
+}
 
-    <!-- 回遊スクリプト（前回調整済みの胴体中心旋回） -->
-    <script>
-      AFRAME.registerComponent('swim-pass-by', {
-        schema: { speed: { type: 'number', default: 0.0008 } },
-        init: function () { this.t = 0; },
-        tick: function (time, timeDelta) {
-          this.t += this.data.speed * timeDelta;
-          const x = Math.sin(this.t) * 1.1;
-          const z = -0.9 - Math.cos(this.t) * 0.5;
-          const y = -0.2 + Math.sin(this.t * 2) * 0.06;
-          this.el.object3D.position.set(x, y, z);
-          
-          const dx = Math.cos(this.t) * 1.1;
-          const dz = Math.sin(this.t) * 0.5;
-          this.el.object3D.rotation.y = Math.atan2(dx, dz);
-          this.el.object3D.rotation.z = -Math.cos(this.t) * 0.08;
-          this.el.object3D.rotation.x = 0;
-        }
-      });
-    </script>
-  </head>
-  <body style="margin: 0; overflow: hidden;">
-    <!-- 終了ボタン（タップで end.html へ） -->
-    <a id="quit-btn" href="end.html">体験をおわる</a>
+/* ============ Quest用の3Dボタンとヒント ============ */
+function makeXrButton(segs,x,z,rotY,bg,fg,onClick){
+  var L=labelTexture(segs,{bg:bg,fg:fg,font:52}), w=0.34;
+  var m=new THREE.Mesh(new THREE.PlaneGeometry(w,w/L.aspect),new THREE.MeshBasicMaterial({map:L.tex,transparent:true,side:THREE.DoubleSide}));
+  m.rotation.y=rotY; m.userData.onClick=onClick; m.visible=false; uiRig.add(m);
+  xrButtons.push({mesh:m,x:x,z:z});
+}
+function buildXrUi(){
+  makeXrButton(TXT.quit,-0.42,-0.85,0.4,'rgba(182,67,43,0.95)','#fff8ee',endExperience);
+  makeXrButton(TXT.place,0.42,-0.85,-0.4,'rgba(6,43,52,0.9)','#EDE4C9',function(){ place(true); });
+  var L=labelTexture(TXT.hint,{font:60});
+  hintMesh=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.9/L.aspect),new THREE.MeshBasicMaterial({map:L.tex,transparent:true,side:THREE.DoubleSide}));
+  hintMesh.position.set(0,0.55,0.2); hintMesh.visible=false; waterRig.add(hintMesh);
+}
 
-    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
-      <a-assets>
-        <a-asset-item id="turtle" src="image/sea+turtle+3d+model.glb"></a-asset-item>
-      </a-assets>
+/* ============ タッチ ============ */
+function poke(lx,lz){
+  if(S.state!=='water'||S.waterK<0.6) return;
+  S.state='popped'; hideHint();
+  spawnRipple(lx,lz,1.15,0.9,2.6,0,true);
+  spawnRipple(lx,lz,1.0,0.8,2.4,0.25,true);
+  spawnRipple(lx,lz,0.85,0.7,2.2,0.5,true);
+  var t0=T+0.5;
+  fish.forEach(function(f,i){ f.launchAt=t0+i*CFG.STAGGER+(f.d.kind==='whale'?0.5:0); });
+}
+function pokeFromRay(o,d){
+  var lx=0,lz=0;
+  if(d.y<-0.02){
+    var t=-o.y/d.y;
+    if(t>0){
+      tmpV.copy(o).addScaledVector(d,t); waterRig.worldToLocal(tmpV); lx=tmpV.x; lz=tmpV.z;
+      var r=Math.hypot(lx,lz), m=CFG.WATER_R-0.2; if(r>m){ lx*=m/r; lz*=m/r; }
+    }
+  }
+  poke(lx,lz);
+}
+var pd=null;
+window.addEventListener('pointerdown',function(e){ if(e.target.closest&&e.target.closest('.ui')) return; pd={x:e.clientX,y:e.clientY}; });
+window.addEventListener('pointerup',function(e){
+  if(!pd) return; var mv=Math.hypot(e.clientX-pd.x,e.clientY-pd.y); pd=null;
+  if(mv>12||S.xr||!scene.camera) return;
+  var ndc=new THREE.Vector2(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);
+  RC.setFromCamera(ndc,scene.camera); pokeFromRay(RC.ray.origin,RC.ray.direction);
+});
+function xrTrigger(ctl){
+  var o=ctl.object3D; o.getWorldPosition(tmpV); o.getWorldQuaternion(qT);
+  var org=tmpV.clone(), dir=new THREE.Vector3(0,0,-1).applyQuaternion(qT);
+  RC.set(org,dir);
+  var hits=RC.intersectObjects(xrButtons.map(function(b){return b.mesh;}),false);
+  if(hits.length){ hits[0].object.userData.onClick(); return; }
+  pokeFromRay(org,dir);
+}
+$('ctlL').addEventListener('triggerdown',function(){ xrTrigger($('ctlL')); });
+$('ctlR').addEventListener('triggerdown',function(){ xrTrigger($('ctlR')); });
 
-      <a-entity swim-pass-by="speed: 0.0008">
-        <a-entity 
-          id="turtle-model"
-          gltf-model="#turtle"
-          position="0 0 0.2" 
-          scale="0.55 0.55 0.55"
-          rotation="0 90 0">
-        </a-entity>
-      </a-entity>
+/* ============ ヒント ============ */
+function showHint(){ S.hintShown=true; if(S.xr){ hintMesh.visible=true; } else { elHint.classList.add('on'); } }
+function hideHint(){ elHint.classList.remove('on'); if(hintMesh) hintMesh.visible=false; }
 
-      <a-light type="ambient" intensity="1.8" color="#ffffff"></a-light>
-      <a-light type="directional" position="1 2 1" intensity="1.2"></a-light>
-      <a-camera></a-camera>
-    </a-scene>
-  </body>
+/* ============ 終了 ============ */
+function stopCam(){ try{ if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; } }catch(e){} try{ vid.srcObject=null; }catch(e){} }
+function endExperience(){
+  stopCam();
+  var wait=0;
+  try{ if(scene.renderer&&scene.renderer.xr&&scene.renderer.xr.getSession()){ scene.exitVR(); wait=350; } }catch(e){}
+  setTimeout(function(){ location.href='end.html'; },wait);
+}
+elQuit.addEventListener('click',endExperience);
+elPlace.addEventListener('click',function(){ place(true); });
+window.addEventListener('pagehide',stopCam);
+
+/* ============ 毎フレーム ============ */
+function frame(tMs,dtMs){
+  var dt=Math.min(dtMs/1000,0.05); T+=dt;
+  if(!S.built||!S.ready) return;
+
+  camEl.object3D.getWorldPosition(vCam); headL.copy(vCam); world.worldToLocal(headL);
+
+  // 進行
+  if(S.state==='market'&&T-S.tStart>CFG.T_WATER){
+    S.state='water'; S.tWater=T; place(false); waterRig.visible=true;
+  }
+  if(S.state==='water'){
+    if(!S.hintShown&&T-S.tWater>CFG.T_HINT) showHint();
+    if(!S.glow&&T-S.tWater>CFG.T_GLOW) S.glow=true;
+  }
+  if(S.state==='popped'){
+    fish.forEach(function(f){ if(f.state==='idle'&&T>=f.launchAt) launch(f); });
+  }
+
+  // 市場
+  var tgt=S.marketTarget, rate=tgt?1/1.2:1/1.6;
+  S.marketFade+=clamp(tgt-S.marketFade,-dt*rate,dt*rate);
+  if(S.state!=='boot') applyMarketFade();
+  sways.forEach(function(s){ s.o.rotation[s.ax]=Math.sin(T*s.f+s.ph)*s.amp; });
+
+  // 海への切り替え
+  if(S.seaT0>=0){
+    var e=T-S.seaT0;
+    S.seaK=clamp((e-0.2)/2.2,0,1);
+    S.discFade=1-clamp((e-0.3)/1.4,0,1);
+    var p=clamp(e/2.4,0,1);
+    waveRing.scale.setScalar(0.3+p*10); waveRing.material.opacity=0.6*(1-p);
+    if(p>=1) waveRing.visible=false;
+    seaMesh.material.opacity=S.seaMax*ease(S.seaK);
+    bubbles.material.opacity=0.75*S.seaK;
+    raysGroup.children.forEach(function(r){ r.material.opacity=S.seaK*(0.07+0.05*Math.sin(T*0.5+r.userData.ph)); });
+    var bd=bubbles.userData, pos=bubbles.geometry.attributes.position.array, top=S.eyeH+3;
+    for(var i=0;i<bd.bv.length;i++){
+      pos[i*3+1]+=bd.bv[i]*dt; if(pos[i*3+1]>top) pos[i*3+1]=0.1;
+      pos[i*3]=bd.bx[i]+Math.sin(T*0.8+i)*0.06; pos[i*3+2]=bd.bz[i]+Math.cos(T*0.7+i)*0.06;
+    }
+    bubbles.geometry.attributes.position.needsUpdate=true;
+    if(S.discFade<=0.001) { disc.visible=false; disc.userData.edge.visible=false; glowDisc.visible=false; }
+  }
+
+  // 水面
+  if(waterRig.visible){
+    if(S.state!=='market') S.waterK=Math.min(1,S.waterK+dt/1.5);
+    var k=ease(S.waterK)*S.discFade;
+    disc.material.opacity=k; disc.scale.setScalar(0.3+0.7*ease(S.waterK));
+    disc.userData.edge.material.opacity=0.45*k; disc.userData.edge.scale.setScalar(0.3+0.7*ease(S.waterK));
+    glowDisc.material.opacity=(S.glow&&S.state==='water')?(0.09+0.09*Math.sin(T*1.4))*k:0;
+    // 誘導用のゆっくりした波紋
+    if(S.state==='water'&&S.waterK>0.5){
+      S._rt=(S._rt||0)-dt;
+      if(S._rt<=0){ S._rt=S.glow?1.1:1.9; spawnRipple(0,0,S.glow?1.05:0.75,S.glow?0.95:0.55,S.glow?2.8:2.4,0,S.glow); }
+    }
+    ripples.forEach(function(r){
+      if(!r.on) return;
+      if(r.delay>0){ r.delay-=dt; return; }
+      r.age+=dt; var u=r.age/r.life;
+      if(u>=1){ r.on=false; r.m.visible=false; return; }
+      r.m.visible=true; r.m.scale.setScalar(Math.max(0.02,r.R*(1-Math.pow(1-u,2))));
+      r.m.material.opacity=r.peak*(1-u)*S.discFade;
+    });
+    if(S.discFade<=0.001&&S.seaT0>=0&&!ripples.some(function(r){return r.on;})) waterRig.visible=false;
+  }
+
+  // 魚
+  fish.forEach(function(f){ updateFish(f,dt); });
+
+  // XR：ヒントは常にこちらを向ける。3Dボタンの表示切り替え
+  if(S.xr){
+    if(hintMesh&&hintMesh.visible) hintMesh.lookAt(vCam);
+    xrButtons.forEach(function(b){ b.mesh.visible=true; });
+  }
+  if(!elDbg.hidden) elDbg.textContent=S.state+' sensor:'+(camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor)+' xr:'+S.xr+' t:'+T.toFixed(1);
+  if(!elMotion.hidden&&camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor) elMotion.hidden=true;
+}
+window.__zkFrame=frame;
+
+/* ============ 開始まわり ============ */
+function startExperience(){
+  if(S.ready) return;
+  if(!S.built){ S.pending=true; return; }
+  S.ready=true; place(true);
+  S.state='market'; S.tStart=T;
+  if(!S.xr){
+    // iOSで傾きが届かないときだけ、許可ボタンを出す
+    setTimeout(function(){
+      var gl=camEl.components['gyro-look'];
+      if(needMotionPerm&&gl&&!gl.hasSensor) elMotion.hidden=false;
+    },1500);
+  }
+}
+elMotion.addEventListener('click',function(){ requestMotion().then(function(r){ if(r==='granted') elMotion.hidden=true; }); });
+
+function startCamera(){
+  showGate(TXT.camLoading,null,null);
+  var ok=false;
+  try{
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia) throw new Error('no mediaDevices');
+    navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false}).then(function(s){
+      stream=s; vid.srcObject=s; var pr=vid.play(); if(pr&&pr.catch) pr.catch(function(){});
+      hideGate(); startExperience();
+    }).catch(failCam);
+    ok=true;
+  }catch(e){}
+  if(!ok) failCam();
+}
+function failCam(){
+  showGate(TXT.camDeny,TXT.start,function(){ requestMotion(); startCamera(); });   // タップから再試行
+}
+
+function questStart(){
+  requestMotion();
+  try{ scene.enterAR(); }catch(e){}
+  setTimeout(function(){ if(!S.xr) showGate(TXT.noXR,TXT.start,questStart); },5000);
+}
+function questGate(){ showGate(TXT.quest,TXT.start,questStart); }
+scene.addEventListener('enter-vr',function(){
+  S.xr=true; document.body.classList.add('xr'); hideGate();
+  setTimeout(startExperience,800);   // 姿勢が安定してから位置を決める
+});
+scene.addEventListener('exit-vr',function(){
+  S.xr=false; document.body.classList.remove('xr');
+  if(isQuest&&!/end\.html/.test(location.href)) questGate();
+});
+
+function init(){
+  world=new THREE.Group(); scene.object3D.add(world);
+  uiRig=new THREE.Group(); scene.object3D.add(uiRig);
+  buildMarket(); buildWater(); buildSea(); buildFish(); buildXrUi();
+  S.marketFade=0; applyMarketFade();
+  S.built=true;
+  if(S.pending) startExperience();
+}
+function boot(){
+  showGate(TXT.camLoading,null,null);
+  var all=Object.keys(TXT).map(function(k){return plain(TXT[k]);}).join('')+'雑喉場大漁鮮魚活';
+  var fonts=document.fonts&&document.fonts.load?Promise.all([
+    document.fonts.load('700 56px "Noto Sans JP"',all),
+    document.fonts.load('800 80px "Shippori Mincho B1"',all)
+  ]).catch(function(){}):Promise.resolve();
+  var timeout=new Promise(function(r){ setTimeout(r,1500); });
+  Promise.race([fonts,timeout]).then(function(){
+    init();
+    if(isQuest) questGate(); else startCamera();
+  });
+}
+if(scene.hasLoaded) boot(); else scene.addEventListener('loaded',boot);
+
+})();
+</script>
+</body>
 </html>
