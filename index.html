@@ -142,7 +142,14 @@ var CFG = {
   GLB_TIMEOUT: 10,    // GLBの読み込みを待つ最大秒数（市場の開始から。超えたら図形の魚で続行）
   SARDINES: 240,      // イワシの数（骨なし版。?n_sardine=… で変更）
   SARDINES_RIG: 80,   // 骨つきイワシの数（?n_rig=… で変更。重ければ減らす）
-  SARDINE_SIZE: 1.6   // イワシの大きさの倍率（1.0で約13cm。?sz_sardine=… で変更）
+  SARDINE_SIZE: 1.6,  // イワシの大きさの倍率（1.0で約13cm。?sz_sardine=… で変更）
+  MKT_IMG: qnum('img',1)!==0,  // 市場の絵（PNG）を使う。?img=0 で図形に戻す（確認用）
+  STALL_H: 2.4,       // 屋台の絵の高さ(m)。幅は絵の縦横比から自動。?sz_stall=… で倍率
+  NOBORI_H: 2.7,      // のぼりの高さ(m)。?sz_nobori=…
+  LANTERN_H: 0.6,     // 提灯の高さ(m)。?sz_lantern=…
+  VENDOR_H: 1.7,      // 魚屋の背たけ(m)。?sz_vendor=…
+  T_STALL: 0.9,       // 屋台の2コマを切り替える間隔(秒)。?t_stall=…
+  T_NOBORI: 1.5       // のぼりの2コマを切り替える間隔(秒)。旗ごとに±13%ずらす。?t_nobori=…
 };
 
 /* ============ 文言（つうじょう／キッズ） ============ */
@@ -281,8 +288,62 @@ function noboriTex(text,bg,fg){
   for(var i=0;i<n;i++) x.fillText(text.charAt(i),64,40+(512-80)*(i+0.5)/n);
   return mkTex(c);
 }
+/* ---- 市場の絵（背景透明PNG）。読めたら図形と入れ替える。読めない・間に合わないときは図形のまま ---- */
+var mkImg = {
+  stall:  {files:['stall_1.png','stall_1b.png']},
+  noboriR:{files:['nobori_1a.png','nobori_1b.png']},   // 朱地「大漁」
+  noboriB:{files:['nobori_2a.png','nobori_2b.png']},   // 藍地「雑喉場」
+  lantern:{files:['lantern.png']},
+  vendor: {files:['sakanaya.png']}
+}, mkAnim = [], PLANE1 = null;
+function initMarketImgs(){
+  Object.keys(mkImg).forEach(function(k){
+    var d=mkImg[k]; d.items=[]; d.hide=[];
+    d.mats=d.files.map(function(){ return regM(new THREE.MeshBasicMaterial({transparent:true,depthWrite:false,side:THREE.DoubleSide})); });
+  });
+}
+/* 絵の板を作る（絵が読めるまでは非表示）。foot＝絵の下の余白の割合（足元を床に合わせる）。lantern は foot=1 で「上が支点」 */
+function addPanel(kind,parent,fig,h,foot,o){
+  o=o||{}; var d=mkImg[kind];
+  var holder=new THREE.Group(); holder.visible=false; parent.add(holder);
+  var mesh=new THREE.Mesh(PLANE1||(PLANE1=new THREE.PlaneGeometry(1,1)),d.mats[0]);
+  mesh.scale.set(h*0.5,h,1); mesh.position.y=h*(0.5-foot); mesh.renderOrder=1;   // 幅は絵が読めた時点で、縦横比どおりに直す
+  holder.add(mesh);
+  d.items.push({fig:fig,holder:holder,mesh:mesh,h:h,flip:!!o.flip,per:o.per||1,off:o.off||0});
+  return holder;
+}
+function activateKind(k,asp){
+  var d=mkImg[k];
+  d.items.forEach(function(it){
+    it.mesh.scale.x=it.h*asp*(it.flip?-1:1);
+    if(it.fig) it.fig.visible=false;
+    it.holder.visible=true;
+    if(d.mats.length>1) mkAnim.push({d:d,mesh:it.mesh,per:it.per,off:it.off});
+  });
+  d.hide.forEach(function(o){ o.visible=false; });   // 絵に置き換えたとき、場所が重なる図形を隠す
+}
+function updateMarketImgs(){   // 2コマの切り替え
+  for(var i=0;i<mkAnim.length;i++){ var s=mkAnim[i], m=s.d.mats[Math.floor((T+s.off)/s.per)&1]; if(s.mesh.material!==m) s.mesh.material=m; }
+}
+function loadImg(file){ return new Promise(function(res,rej){ var im=new Image(); im.onload=function(){ res(im); }; im.onerror=function(){ rej(new Error('404 '+file)); }; im.src=file; }); }
+function loadMarketImgs(){
+  if(!CFG.MKT_IMG){ glbLog.push('img:off'); return; }
+  Object.keys(mkImg).forEach(function(k){
+    var d=mkImg[k]; glbPending++;   // GLBと同じ待ち（最大 GLB_TIMEOUT 秒）。超えたら図形で続行
+    Promise.all(d.files.map(loadImg)).then(function(ims){
+      if(glbExpired||!(S.state==='boot'||S.state==='market')) throw new Error('late');
+      ims.forEach(function(im,i){
+        var t=new THREE.Texture(im); if(THREE.SRGBColorSpace) t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; t.needsUpdate=true;
+        d.mats[i].map=t; d.mats[i].needsUpdate=true;
+        try{ if(scene.renderer&&scene.renderer.initTexture) scene.renderer.initTexture(t); }catch(e){}   // 先にGPUへ送って、表示の瞬間のもたつきを防ぐ
+      });
+      activateKind(k,ims[0].width/ims[0].height); glbLog.push('img:'+k+':ok');
+    }).catch(function(e){ glbLog.push('img:'+k+':NG('+String((e&&e.message)||e).slice(0,30)+')'); }).then(function(){ glbPending--; });
+  });
+}
 function buildMarket(){
   var g = marketGroup = new THREE.Group(); world.add(g);
+  initMarketImgs();
   var wood=regM(new THREE.MeshLambertMaterial({color:0x7A5A3C}));
   var woodD=regM(new THREE.MeshLambertMaterial({color:0x4A3524}));
   var silver=regM(new THREE.MeshLambertMaterial({color:0xC9D3D6}));
@@ -294,7 +355,8 @@ function buildMarket(){
 
   // 屋台（中心を向く）
   [-62,62,-125,125,180].forEach(function(a){
-    var st=new THREE.Group(); st.position.copy(polar(a,3.3)); g.add(st); st.lookAt(0,0,0);
+    var rig=new THREE.Group(); rig.position.copy(polar(a,3.3)); g.add(rig); rig.lookAt(0,0,0);
+    var st=new THREE.Group(); rig.add(st);   // 図形の屋台（絵が読めたら隠す）
     addMesh(st,G.box,wood,[0,0.375,0],[1.7,0.75,0.6]);
     for(var i=0;i<5;i++){ var f=addMesh(st,G.sph,silver,[-0.6+i*0.3,0.8,0.05],[0.14,0.035,0.05]); f.rotation.y=(i%2?0.3:-0.2); }
     [-1,1].forEach(function(s){ addMesh(st,G.cyl,woodD,[s*0.9,1.05,0.2],[0.04,2.1,0.04]); });
@@ -304,6 +366,8 @@ function buildMarket(){
       addMesh(pv,norenGeo,norenMats[j],[0,-0.36,0]);
       sways.push({o:pv,ax:'x',ph:Math.random()*6,f:1.3+Math.random()*0.6,amp:0.1});
     }
+    // 絵の屋台（2コマを切り替える。文字があるので左右反転はしない）
+    addPanel('stall',rig,st,CFG.STALL_H*qnum('sz_stall',1),0.045,{per:CFG.T_STALL*(0.9+Math.random()*0.2),off:Math.random()*5});
   });
   // のぼり
   var nTexts=['雑喉場','大漁','鮮魚','活魚'], nBg=['#B6432B','#1B3A5C','#1B3A5C','#B6432B'];
@@ -311,17 +375,31 @@ function buildMarket(){
   var nGeo=new THREE.PlaneGeometry(0.5,1.9);
   [-20,20,-45,45,-95,95,-155,155].forEach(function(a,i){
     var gp=new THREE.Group(); gp.position.copy(polar(a,4.1)); g.add(gp); gp.lookAt(0,0,0);
-    addMesh(gp,G.cyl,woodD,[0,1.3,0],[0.025,2.6,0.025]);
-    var pv=new THREE.Group(); pv.position.set(0,2.5,0); gp.add(pv);
+    var fg=new THREE.Group(); gp.add(fg);   // 図形ののぼり（絵が読めたら隠す）
+    addMesh(fg,G.cyl,woodD,[0,1.3,0],[0.025,2.6,0.025]);
+    var pv=new THREE.Group(); pv.position.set(0,2.5,0); fg.add(pv);
     addMesh(pv,nGeo,nMats[i%4],[0.27,-0.95,0]);
     sways.push({o:pv,ax:'y',ph:Math.random()*6,f:1.5+Math.random()*0.8,amp:0.32});
+    // 絵ののぼり：朱・藍を交互に。旗ごとに切り替えの間隔（1.3〜1.7秒）とタイミングをずらす
+    addPanel(i%2===0?'noboriR':'noboriB',gp,fg,CFG.NOBORI_H*qnum('sz_nobori',1),0.011,{per:CFG.T_NOBORI*(0.87+Math.random()*0.26),off:Math.random()*6});
+    if(Math.abs(a)===95) mkImg.vendor.hide.push(gp);   // ±95°は魚屋の場所。魚屋の絵が読めたら、のぼりは立てない
   });
   // 提灯
   [-10,35,80,-80,140,-140].forEach(function(a,i){
-    var l=new THREE.Group(); l.position.copy(polar(a,3.0)); l.position.y=2.3; g.add(l);
+    var lr=new THREE.Group(); lr.position.copy(polar(a,3.0)); g.add(lr); lr.lookAt(0,0,0);
+    var l=new THREE.Group(); l.position.y=2.3; lr.add(l);   // 図形の提灯（絵が読めたら隠す）
     addMesh(l,G.sph,lantM,[0,0,0],[0.17,0.21,0.17]);
     addMesh(l,G.cyl,goldM,[0,0.21,0],[0.07,0.04,0.07]);
     sways.push({o:l,ax:'z',ph:i*1.7,f:1.1,amp:0.06});
+    var hp=addPanel('lantern',lr,l,CFG.LANTERN_H*qnum('sz_lantern',1),1,{});   // 絵の提灯：吊り元（上）を支点に揺らす
+    hp.position.y=2.7;
+    sways.push({o:hp,ax:'z',ph:i*1.7,f:1.1,amp:0.06});
+  });
+  // 魚屋（天秤棒）：屋台のすきまに立たせる。足元が床、少しだけ揺れて歩いている感じ
+  [0,-93,93].forEach(function(a,i){
+    var vr=new THREE.Group(); vr.position.copy(polar(a,3.0)); g.add(vr); vr.lookAt(0,0,0);
+    var hp=addPanel('vendor',vr,null,CFG.VENDOR_H*qnum('sz_vendor',1),0.004,{flip:i===1});
+    sways.push({o:hp,ax:'z',ph:i*2.1,f:1.7,amp:0.025});
   });
 }
 function applyMarketFade(){
@@ -1004,6 +1082,7 @@ function frame(tMs,dtMs){
   S.marketFade+=clamp(tgt-S.marketFade,-dt*rate,dt*rate);
   if(S.state!=='boot') applyMarketFade();
   sways.forEach(function(s){ s.o.rotation[s.ax]=Math.sin(T*s.f+s.ph)*s.amp; });
+  updateMarketImgs();
 
   // 海への切り替え
   if(S.seaT0>=0){
@@ -1059,9 +1138,10 @@ function frame(tMs,dtMs){
     xrButtons.forEach(function(b){ b.mesh.visible=true; });
   }
   if(!elDbg.hidden){
-    var gl=glbLog.filter(function(x){ return !/^(iwashi|sd:)/.test(x); }), sl=glbLog.filter(function(x){ return /^(iwashi|sd:)/.test(x); });
+    var gl=glbLog.filter(function(x){ return !/^(iwashi|sd:|img)/.test(x); }), sl=glbLog.filter(function(x){ return /^(iwashi|sd:)/.test(x); }), ml=glbLog.filter(function(x){ return /^img/.test(x); });
     elDbg.textContent=S.state+' sensor:'+(camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor)+' xr:'+S.xr+' t:'+T.toFixed(1)+' snd:'+Snd.state()
       +'\nglb: '+gl.join(' ')
+      +'\nmk: '+ml.join(' ')+' (anim:'+mkAnim.length+')'
       +'\nsd: '+(school?(school.state+'/'+(school.mesh.visible?'show':'hide')+'/'+school.N+(school.err?'/ERR '+school.err:'')):'none')+' '+sl.join(' ');
   }
   if(!elMotion.hidden&&camEl.components['gyro-look']&&camEl.components['gyro-look'].hasSensor) elMotion.hidden=true;
@@ -1121,7 +1201,7 @@ function init(){
   world=new THREE.Group(); scene.object3D.add(world);
   uiRig=new THREE.Group(); scene.object3D.add(uiRig);
   buildMarket(); buildWater(); buildSea(); buildFish(); buildSchool(); buildXrUi();
-  Snd.attempt(); loadGLBs();
+  Snd.attempt(); loadGLBs(); loadMarketImgs();
   S.marketFade=0; applyMarketFade();
   S.built=true;
   if(S.pending) startExperience();
