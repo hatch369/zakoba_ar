@@ -132,7 +132,8 @@ var CFG = {
   EYE_H: 1.1,         // 座った目線の高さ(m)
   FOV: 70,
   WATER_R: 1.3,       // 水面の半径(m)
-  T_WATER: 4.0,       // 市場の場面を見せる秒数（この後に水面が出る）
+  T_WATER: 6.0,       // 市場の場面を見せる秒数（この後に水面が出る）。この間「ぐるっと見わたしてみよう」を出す
+  T_LOOK: 0.5,        // 市場が始まってから「見わたしてみよう」を出すまでの秒数
   T_HINT: 3.0,        // 魚影が泳ぎ始めてからヒントまで
   T_GLOW: 10.0,       // 魚影が泳ぎ始めてから、波紋を光らせるまで
   STAGGER: 0.3,       // 飛び出しの間隔(秒)
@@ -161,6 +162,7 @@ var TXT = {
   quit:  P([{t:'体験をおわる'}],[{t:'体験',r:'たいけん'},{t:'を おわる'}]),
   place: P([{t:'位置をなおす'}],[{t:'位置',r:'いち'},{t:'を なおす'}]),
   hint:  P([{t:'水面にふれてみよう'}],[{t:'水面',r:'すいめん'},{t:'に ふれてみよう'}]),
+  look:  P([{t:'ぐるっと見わたしてみよう'}],[{t:'ぐるっと '},{t:'見',r:'み'},{t:'わたしてみよう'}]),
   start: P([{t:'タップして'},{t:'はじめる'}],[{t:'タップして'},{t:' はじめよう'}]),
   camLoading: P([{t:'カメラをひらいています…'}],[{t:'カメラを ひらいているよ…'}]),
   camDeny: P([{t:'カメラが使えませんでした。許可を確認して、もう一度タップしてください。'}],
@@ -234,7 +236,7 @@ var S = { built:false, ready:false, pending:false, state:'boot', eyeH:CFG.EYE_H,
   marketFade:0, marketTarget:1, seaK:0, seaT0:-1, discFade:1, seaMax:CFG.SEA_OP_PHONE };
 var T = 0;
 var world, uiRig, waterRig, marketGroup, seaMesh, raysGroup, bubbles, waveRing, disc, glowDisc, hintMesh;
-var xrButtons = [], ripples = [], sways = [], fish = [], marketMats = [];
+var lookMesh = null, xrButtons = [], ripples = [], sways = [], fish = [], marketMats = [];
 var stream = null;
 
 var vCam=new THREE.Vector3(), qCam=new THREE.Quaternion(), vFwd=new THREE.Vector3(), vUp=new THREE.Vector3();
@@ -259,6 +261,7 @@ function place(full){
   waterRig.position.set(hx*d,0,hz*d); waterRig.rotation.y=yaw;
   uiRig.position.set(world.position.x,0,world.position.z); uiRig.rotation.y=yaw;
   xrButtons.forEach(function(b){ b.mesh.position.set(b.x,S.eyeH-0.5,b.z); });
+  if(lookMesh) lookMesh.position.set(0,S.eyeH-0.1,-1.3);
 }
 
 /* ============ 市場（コードで描く：のぼり・暖簾・屋台・提灯） ============ */
@@ -892,6 +895,10 @@ function buildXrUi(){
   var L=labelTexture(TXT.hint,{font:60});
   hintMesh=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.9/L.aspect),new THREE.MeshBasicMaterial({map:L.tex,transparent:true,side:THREE.DoubleSide}));
   hintMesh.position.set(0,0.55,0.2); hintMesh.visible=false; waterRig.add(hintMesh);
+  // 市場の間の「ぐるっと見わたしてみよう」（Quest用。正面の少し下に出す）
+  var L2=labelTexture(TXT.look,{font:60});
+  lookMesh=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.9/L2.aspect),new THREE.MeshBasicMaterial({map:L2.tex,transparent:true,side:THREE.DoubleSide}));
+  lookMesh.position.set(0,S.eyeH-0.1,-1.3); lookMesh.visible=false; uiRig.add(lookMesh);
 }
 
 /* ============ タッチ ============ */
@@ -936,8 +943,11 @@ $('ctlL').addEventListener('triggerdown',function(){ xrTrigger($('ctlL')); });
 $('ctlR').addEventListener('triggerdown',function(){ xrTrigger($('ctlR')); });
 
 /* ============ ヒント ============ */
-function showHint(){ S.hintShown=true; if(S.xr){ hintMesh.visible=true; } else { elHint.classList.add('on'); } }
+function showHint(){ S.hintShown=true; elHint.innerHTML=H(TXT.hint); if(S.xr){ hintMesh.visible=true; } else { elHint.classList.add('on'); } }
 function hideHint(){ elHint.classList.remove('on'); if(hintMesh) hintMesh.visible=false; }
+/* 市場の間の「ぐるっと見わたしてみよう」。同じ吹き出しを使い、水面が出たら消して、あとで「水面にふれてみよう」に入れ替わる */
+function showLook(){ S.lookShown=true; elHint.innerHTML=H(TXT.look); if(S.xr){ if(lookMesh) lookMesh.visible=true; } else { elHint.classList.add('on'); } }
+function hideLook(){ elHint.classList.remove('on'); if(lookMesh) lookMesh.visible=false; }
 
 /* ============ 音（Web Audioで合成。市場のざわめきだけ market.mp3 を使う。無ければ無音） ============ */
 var MARKET_FILE='market.mp3', VOICE_FILE='voice.mp3';
@@ -1094,8 +1104,9 @@ function frame(tMs,dtMs){
   camEl.object3D.getWorldPosition(vCam); headL.copy(vCam); world.worldToLocal(headL);
 
   // 進行
+  if(S.state==='market'&&!S.lookShown&&T-S.tStart>CFG.T_LOOK) showLook();
   if(S.state==='market'&&T-S.tStart>CFG.T_WATER&&(glbPending<=0||glbExpired)){
-    S.state='water'; S.tWater=T; place(false); waterRig.visible=true;
+    S.state='water'; S.tWater=T; place(false); waterRig.visible=true; hideLook();
   }
   if(S.state==='water'){
     if(!S.hintShown&&T-S.tWater>CFG.T_HINT) showHint();
