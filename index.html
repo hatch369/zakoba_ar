@@ -146,7 +146,7 @@ var CFG = {
   MKT_IMG: qnum('img',1)!==0,  // 市場の絵（PNG）を使う。?img=0 で図形に戻す（確認用）
   STALL_H: 2.4,       // 屋台の絵の高さ(m)。幅は絵の縦横比から自動。?sz_stall=… で倍率
   NOBORI_H: 2.7,      // のぼりの高さ(m)。?sz_nobori=…
-  LANTERN_H: 0.6,     // 提灯の高さ(m)。?sz_lantern=…
+  LANTERN_H: 0.55,    // 提灯の高さ(m)。?sz_lantern=…
   VENDOR_H: 1.7,      // 魚屋の背たけ(m)。?sz_vendor=…
   T_STALL: 0.9,       // 屋台の2コマを切り替える間隔(秒)。?t_stall=…
   T_NOBORI: 1.5       // のぼりの2コマを切り替える間隔(秒)。旗ごとに±13%ずらす。?t_nobori=…
@@ -295,7 +295,13 @@ var mkImg = {
   noboriB:{files:['nobori_2a.png','nobori_2b.png']},   // 藍地「雑喉場」
   lantern:{files:['lantern.png']},
   vendor: {files:['sakanaya.png']}
-}, mkAnim = [], PLANE1 = null;
+}, mkAnim = [], PLANE1 = null, garland = null, sphereLanterns = [];
+/* のぼり・提灯の絵が全部読めたら、ひもを渡した提灯に切り替える（それまで／読めないときは、図形の提灯のまま） */
+function updateGarland(){
+  if(!garland||!(mkImg.noboriR.on&&mkImg.noboriB.on&&mkImg.lantern.on)) return;
+  garland.visible=true;
+  sphereLanterns.forEach(function(o){ o.visible=false; });
+}
 function initMarketImgs(){
   Object.keys(mkImg).forEach(function(k){
     var d=mkImg[k]; d.items=[]; d.hide=[];
@@ -321,6 +327,7 @@ function activateKind(k,asp){
     if(d.mats.length>1) mkAnim.push({d:d,mesh:it.mesh,per:it.per,off:it.off});
   });
   d.hide.forEach(function(o){ o.visible=false; });   // 絵に置き換えたとき、場所が重なる図形を隠す
+  d.on=true; updateGarland();
 }
 function updateMarketImgs(){   // 2コマの切り替え
   for(var i=0;i<mkAnim.length;i++){ var s=mkAnim[i], m=s.d.mats[Math.floor((T+s.off)/s.per)&1]; if(s.mesh.material!==m) s.mesh.material=m; }
@@ -391,9 +398,30 @@ function buildMarket(){
     addMesh(l,G.sph,lantM,[0,0,0],[0.17,0.21,0.17]);
     addMesh(l,G.cyl,goldM,[0,0.21,0],[0.07,0.04,0.07]);
     sways.push({o:l,ax:'z',ph:i*1.7,f:1.1,amp:0.06});
-    var hp=addPanel('lantern',lr,l,CFG.LANTERN_H*qnum('sz_lantern',1),1,{});   // 絵の提灯：吊り元（上）を支点に揺らす
-    hp.position.y=2.7;
-    sways.push({o:hp,ax:'z',ph:i*1.7,f:1.1,amp:0.06});
+    sphereLanterns.push(lr);   // 絵の提灯に切り替わったら隠す
+  });
+  // 絵の提灯：のぼりの横木から横木へひもを渡して吊るす（のぼり2種・提灯の絵が全部読めたときだけ表示）
+  garland=new THREE.Group(); garland.visible=false; g.add(garland);
+  var NH=CFG.NOBORI_H*qnum('sz_nobori',1), NW=NH*254/1024, HY=NH*0.947, LHt=CFG.LANTERN_H*qnum('sz_lantern',1);
+  var ropeM=regM(new THREE.MeshBasicMaterial({color:0x5C3E26}));
+  var ropeL=regM(new THREE.LineBasicMaterial({color:0x5C3E26}));
+  // [左ののぼりの角度, 右ののぼりの角度, 提灯の位置(0〜1), たるみ(m)]。屋台の後ろ側は、屋台の屋根をよけて両わきに吊るす
+  [[-45,-20,[0.5],0.15],[-20,20,[0.2,0.5,0.8],0.30],[20,45,[0.5],0.15],[155,205,[0.1,0.9],0.35]].forEach(function(sp,si){
+    var a=sp[0]*Math.PI/180, b=sp[1]*Math.PI/180, pa=polar(sp[0],4.1), pb=polar(sp[1],4.1);
+    var ax=pa.x+Math.cos(a)*NW*0.42, az=pa.z+Math.sin(a)*NW*0.42;   // 左ののぼりの横木の右はし
+    var bx=pb.x-Math.cos(b)*NW*0.44, bz=pb.z-Math.sin(b)*NW*0.44;   // 右ののぼりの横木の左はし
+    var at=function(t){ return new THREE.Vector3(ax+(bx-ax)*t, HY-sp[3]*4*t*(1-t), az+(bz-az)*t); };
+    var pts=[]; for(var k=0;k<=12;k++) pts.push(at(k/12));
+    var rope=null;
+    try{ rope=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),24,0.007,4,false),ropeM); }
+    catch(e){ rope=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),ropeL); }
+    garland.add(rope);
+    sp[2].forEach(function(t,li){
+      var p=at(t), lr=new THREE.Group(); lr.position.set(p.x,0,p.z); garland.add(lr); lr.lookAt(0,0,0);
+      var hp=addPanel('lantern',lr,null,LHt,1,{});   // 吊り元（上）を支点に揺らす
+      hp.position.y=p.y;
+      sways.push({o:hp,ax:'z',ph:si*2.3+li*1.9,f:1.1+0.05*li,amp:0.06});
+    });
   });
   // 魚屋（天秤棒）：屋台のすきまに立たせる。足元が床、少しだけ揺れて歩いている感じ
   [0,-93,93].forEach(function(a,i){
