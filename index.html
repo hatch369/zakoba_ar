@@ -944,7 +944,11 @@ window.addEventListener('pointerup',function(e){
   RC.setFromCamera(ndc,scene.camera); pokeFromRay(RC.ray.origin,RC.ray.direction);
 });
 var xrOrg=new THREE.Vector3(), xrDir=new THREE.Vector3(), ctlLEl=$('ctlL'), ctlREl=$('ctlR');
-function xrRay(ctl){ var o=ctl.object3D; o.getWorldPosition(xrOrg); o.getWorldQuaternion(qT); xrDir.set(0,0,-1).applyQuaternion(qT); }
+function xrRay(ctl){   // 画面に見えているレーザーと同じ線を使う（A-Frameのraycasterが持つ向き。コントローラーの正面とはずれることがある）
+  var rc=ctl.components&&ctl.components.raycaster, r=rc&&rc.raycaster&&rc.raycaster.ray;
+  if(r&&isFinite(r.origin.x+r.origin.y+r.origin.z)&&r.direction.lengthSq()>0.5){ xrOrg.copy(r.origin); xrDir.copy(r.direction).normalize(); return; }
+  var o=ctl.object3D; o.getWorldPosition(xrOrg); o.getWorldQuaternion(qT); xrDir.set(0,0,-1).applyQuaternion(qT);   // 予備
+}
 function xrHitButton(){   // 今の xrOrg / xrDir のレーザーが当たっているボタン（なければ null）
   RC.set(xrOrg,xrDir);
   var hits=RC.intersectObjects(xrButtons.map(function(b){ return b.hit; }),false);
